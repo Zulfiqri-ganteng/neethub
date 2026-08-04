@@ -4,9 +4,12 @@
 #  Mengikuti pola deploy project "kangmuslim" / "galajuara".
 #
 #  Cara pakai di hosting cPanel:
-#    1. Pastikan repo sudah di-clone ke $PROJECT (lihat PANDUAN.md bagian Deploy).
+#    1. Pastikan repo sudah di-clone ke $PROJECT (folder subdomain yang
+#       sudah otomatis dibuat cPanel di dalam public_html — subdomain di
+#       akun ini tidak bisa diarahkan keluar dari public_html, jadi
+#       .htaccess di root project yang mengarahkan ke public/).
 #    2. Jalankan manual lewat Terminal cPanel/SSH:
-#         bash "$HOME/neethub/deploy/deploy.sh"
+#         bash "$HOME/public_html/neethub.kangmuslim.com/deploy/deploy.sh"
 #       ATAU pasang sebagai Cron Job di cPanel.
 #
 #  Catatan: path memakai $HOME agar otomatis mengikuti akun cPanel
@@ -14,7 +17,7 @@
 # ============================================================================
 
 LOGFILE="$HOME/deploy/deploy-neethub.log"
-PROJECT="$HOME/neethub"
+PROJECT="$HOME/public_html/neethub.kangmuslim.com"
 GIT="/usr/local/cpanel/3rdparty/lib/path-bin/git"
 PHP="/usr/local/bin/php"
 COMPOSER="composer"

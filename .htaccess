@@ -1,0 +1,23 @@
+# ============================================================
+#  Arahkan semua request ke folder public/ (CodeIgniter 4)
+#  Berguna bila document root domain/subdomain menunjuk ke folder
+#  ini (mis. subdomain cPanel yang docroot-nya tidak bisa diarahkan
+#  keluar dari public_html) sehingga situs tetap bisa diakses tanpa
+#  "/public/" pada URL.
+# ============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Lapisan proteksi tambahan (tetap berlaku walau mod_rewrite mati) —
+# blokir langsung folder/file sensitif yang ikut ter-clone di sini.
+<IfModule mod_alias.c>
+    RedirectMatch 404 ^/\.git(/|$)
+    RedirectMatch 404 ^/(app|vendor|writable|tests|deploy|docs)(/|$)
+</IfModule>
+
+<FilesMatch "^(\.env|composer\.(json|lock)|spark)$">
+    Require all denied
+</FilesMatch>
