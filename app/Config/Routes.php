@@ -53,6 +53,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('invoices', 'InvoiceController::index', ['filter' => 'permission:invoices.view']);
         $routes->post('invoices/generate', 'InvoiceController::generate', ['filter' => 'permission:invoices.create']);
         $routes->get('invoices/(:num)', 'InvoiceController::show/$1', ['filter' => 'permission:invoices.view']);
+        $routes->get('invoices/(:num)/qris', 'InvoiceController::qris/$1', ['filter' => 'permission:invoices.view']);
         $routes->get('invoices/(:num)/pdf', 'InvoiceController::pdf/$1', ['filter' => 'permission:invoices.view']);
 
         $routes->get('routers', 'RouterController::index', ['filter' => 'permission:routers.view']);

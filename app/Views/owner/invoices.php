@@ -62,9 +62,27 @@
                 <div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>
             </div>
             <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary d-none" id="detailQrisBtn" onclick="showOwnerQris()">
+                    <i class="ti ti-qrcode"></i> Tampilkan QR/Rekening
+                </button>
                 <button type="button" class="btn btn-outline-secondary" id="detailPdfBtn" onclick="downloadInvoicePdf(currentInvoiceId, currentInvoiceNumber)">
                     <i class="ti ti-file-type-pdf"></i> Download PDF
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- QRIS / Bank Modal -->
+<div class="modal fade" id="qrisModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">QR / Rekening Pembayaran</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="qrisBody">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>
             </div>
         </div>
     </div>
@@ -155,6 +173,7 @@ async function viewDetail(id) {
     const i = body.data;
     currentInvoiceId = i.id;
     currentInvoiceNumber = i.invoice_number;
+    document.getElementById('detailQrisBtn').classList.toggle('d-none', i.status === 'paid');
     document.getElementById('detailBody').innerHTML = `
         <table class="table table-sm mb-0">
             <tr><th>No. Tagihan</th><td>${i.invoice_number}</td></tr>
@@ -167,6 +186,32 @@ async function viewDetail(id) {
             <tr><th>Status</th><td>${statusBadge(i.status)}</td></tr>
             <tr><th>Dibayar Pada</th><td>${i.paid_at || '-'}</td></tr>
         </table>`;
+}
+
+async function showOwnerQris() {
+    new bootstrap.Modal(document.getElementById('qrisModal')).show();
+    const box = document.getElementById('qrisBody');
+    box.innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>';
+
+    try {
+        const body = await nethubFetch('/api/owner/invoices/' + currentInvoiceId + '/qris');
+        if (!body.success) { box.innerHTML = `<div class="alert alert-danger mb-0">${body.message}</div>`; return; }
+
+        const d = body.data;
+        box.innerHTML = `
+            <div class="text-center mb-3">
+                <img src="${d.image_data_uri}" class="img-fluid" style="max-width:250px;" alt="QRIS">
+            </div>
+            <p class="text-muted small text-center mb-3">Tunjukkan/kirim QR ini ke pelanggan untuk dipindai lewat aplikasi e-wallet/m-banking.</p>
+            <div class="alert alert-info small mb-0">
+                <strong>Atau transfer manual ke:</strong><br>
+                ${d.bank_name || '-'} — ${d.bank_account_number || '-'}<br>
+                a.n. ${d.bank_account_name || '-'}
+            </div>
+        `;
+    } catch (err) {
+        if (err.message !== 'Unauthenticated') box.innerHTML = '<div class="alert alert-danger mb-0">Gagal memuat QR.</div>';
+    }
 }
 
 async function downloadInvoicePdf(id, invoiceNumber) {
