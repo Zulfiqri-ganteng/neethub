@@ -1221,6 +1221,78 @@ cron that already runs daily, negligible), and yes to a real Super Admin panel.
    explicitly NOT a white-labeled/per-tenant Play Store listing, which the user considered and
    deliberately ruled out as much bigger scope than needed right now.
 
+### Forgot/reset password — done (2026-08-04, same session, ad-hoc request while deploying Stage 13)
+
+Not part of the original Stage 13 plan — the user hit this need directly while setting up their first
+real Super Admin login on the actual `neethub.kangmuslim.com` deployment (see the deploy log below)
+and asked for it on the spot. **Works uniformly for every role** (owner/admin/teknisi/kasir/pelanggan/
+super_admin) because it's keyed by email through the shared `/api/auth/*` group, not anything
+tenant- or role-specific.
+
+- `password_resets` table already existed since **Stage 1** (`email`, `token_hash`, `expires_at`,
+  `used_at`) — like the customer portal, schema was there from the start but zero code ever used it
+  until now.
+- `PasswordResetModel` — `findValid(email, token)` hashes the incoming raw token (sha256) and
+  compares against the stored hash, only matching unused + unexpired rows.
+- `AuthController::forgotPassword()` (`POST /api/auth/forgot-password`, rate-limited 5/900s) — always
+  returns the same generic message regardless of whether the email exists, to avoid user
+  enumeration. If it does exist and the account is active: generates a random 32-byte token, stores
+  only its hash, 1-hour expiry, queues an **email** notification (not WhatsApp — deliberately, since
+  `super_admin` has no tenant and therefore no tenant WhatsApp/Fonnte config to send through; email
+  is the only channel that works identically for every role including tenantless ones) carrying the
+  raw token, via the same `NotificationModel::queue()` + `notifications:send` cron pipeline as
+  everything else.
+- `AuthController::resetPassword()` (`POST /api/auth/reset-password`, rate-limited 10/900s) —
+  validates the token, updates the password (hashed by `UserModel`'s existing `beforeInsert`/
+  `beforeUpdate` callback), marks the reset row used, and **revokes every refresh token for that
+  user** (`RefreshTokenModel::revokeAllForUser`) — a password reset should kill any already-logged-in
+  session, not just stop future logins with the old password.
+- New `password_reset` notification type/template (`NotificationTemplates::passwordReset`) — builds
+  the reset link via `base_url('reset-password?email=...&token=...')`.
+- **Same redaction treatment applied as `account_created`** (Stage 13 phase 1's security fix,
+  reused here rather than re-derived): `NotificationDispatcher` redacts `payload.token` to
+  `'[redacted-after-send]'` once the email actually sends, so the raw token doesn't sit in the
+  `notifications` table in plaintext indefinitely (it's already single-use + 1-hour-expiring at the
+  `password_resets` level — this is defense in depth on top of that, not the only protection).
+- **Web**: `/forgot-password` (request form) and `/reset-password?email=...&token=...` (new-password
+  form, reads params from the URL query) — both under `layouts/auth.php`, same minimal shell as
+  login/register. "Lupa password?" link added to `login.php`.
+- **Real bug found and fixed during testing**: `PasswordResetModel` initially set
+  `protected $updatedField = false;` to disable the (non-existent) `updated_at` column on this
+  table — CI4 expects a `string` there (empty string `''` for "no such column"), not a `bool`. `false`
+  silently coerced into a bad array key internally and threw a `TypeError` inside
+  `BaseBuilder::setBind()` on the very first insert attempt. Fixed to `''`. Worth remembering for any
+  future model on a table without `updated_at` — `''`, not `false`.
+- **Verified against the running dev server, full real flow**: called forgot-password for a real
+  existing email and a fake one → confirmed byte-identical generic response either way (no
+  enumeration leak), confirmed the real one queued a `password_resets` row + a `notifications` row
+  with the real raw token, called reset-password with that real token → password actually changed,
+  confirmed login with the *new* password works, confirmed **reusing the same token a second time
+  correctly fails** ("tidak valid atau sudah kedaluwarsa"), ran `notifications:send` for real →
+  confirmed it dispatched (`LogEmailSender` fallback, no real SMTP configured yet — same
+  accepted-gap tier as WhatsApp/gateway senders elsewhere in this file) and confirmed the token got
+  redacted in the DB afterward. melati's demo password restored to the documented `password123`
+  afterward, all test rows deleted — demo state left clean.
+- **Not built**: no Android UI for this yet (`nethub_owner` only has Login/Register screens, no
+  forgot-password screen) — not asked for this session, flag if it comes up. Same for a rate-limit
+  cache key reset helper (production hit `RateLimitFilter`'s 429 a few times during this same
+  session's earlier testing — cleared once locally via `php spark cache:clear`; there's no
+  equivalent "just wait it out or clear cache" shortcut documented for production, worth remembering
+  if it happens again on `neethub.kangmuslim.com`).
+
+**2026-08-04 — first real deploy activity on `neethub.kangmuslim.com`.** The user pulled this
+session's Stage 13 commits onto the actual Rumahweb hosting (cPanel terminal, path
+`~/public_html/neethub.kangmuslim.com`) and ran `php spark migrate` for real — **this backend is no
+longer purely local-only**, contradicting this file's older "nothing is deployed there yet" framing
+in a few places above (not rewritten historically, per this file's own convention — noting it fresh
+here instead). They then ran `php spark migrate:refresh` (full reset — confirmed with the user this
+was intentional, environment had only demo/test data, no real customers) to get a clean slate for
+testing owner self-registration from scratch, re-seeded `RolePermissionSeeder`, and created a real
+`super_admin` account via `superadmin:create`. **Flutter's `kUseProductionApi` is still `false`** —
+the Android app doesn't point here yet, this was purely the user testing the web side directly.
+Whatever `super_admin` credentials exist on that server as of "now" should be treated as live/current
+rather than assumed from any earlier note in this file — check with the user rather than assuming.
+
 ## Cross-cutting requirements to not lose track of
 
 `docs/SPEC.md` has a Testing Strategy, Deployment Strategy, Performance Targets, Migration/Data

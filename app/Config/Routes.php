@@ -6,6 +6,8 @@ use CodeIgniter\Router\RouteCollection;
 $routes->get('/', static fn () => redirect()->to('/login'));
 $routes->get('login', 'Web\LoginController::index');
 $routes->get('register', 'Web\RegisterController::index');
+$routes->get('forgot-password', 'Web\ForgotPasswordController::index');
+$routes->get('reset-password', 'Web\ResetPasswordController::index');
 $routes->get('dashboard', 'Web\DashboardController::index');
 $routes->get('platform-billing', 'Web\PlatformBillingController::index');
 $routes->get('customers', 'Web\CustomerController::index');
@@ -36,6 +38,8 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->post('login', 'AuthController::login', ['filter' => 'ratelimit:login,5,900']);
         $routes->post('refresh', 'AuthController::refresh', ['filter' => 'ratelimit:refresh,20,900']);
         $routes->post('logout', 'AuthController::logout', ['filter' => 'jwtauth']);
+        $routes->post('forgot-password', 'AuthController::forgotPassword', ['filter' => 'ratelimit:forgot_password,5,900']);
+        $routes->post('reset-password', 'AuthController::resetPassword', ['filter' => 'ratelimit:reset_password,10,900']);
     });
 
     // Owner + Admin + Teknisi + Kasir share the /api/owner/* surface; each

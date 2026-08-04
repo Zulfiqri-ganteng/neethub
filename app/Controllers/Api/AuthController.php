@@ -5,6 +5,8 @@ namespace App\Controllers\Api;
 use App\Helpers\AuthHelper;
 use App\Helpers\ValidationHelper;
 use App\Models\ActivityModel;
+use App\Models\NotificationModel;
+use App\Models\PasswordResetModel;
 use App\Models\PlatformSettingModel;
 use App\Models\RefreshTokenModel;
 use App\Models\RoleModel;
@@ -204,6 +206,80 @@ class AuthController extends BaseApiController
         );
 
         return $this->ok(null, 'Logout berhasil.');
+    }
+
+    /**
+     * Works for every role — owner/admin/teknisi/kasir/pelanggan/super_admin
+     * all log in through this same shared endpoint, so one flow covers all
+     * of them. Always returns the same generic success message whether or
+     * not the email exists, to avoid leaking which emails are registered.
+     */
+    public function forgotPassword()
+    {
+        if (! $this->validate(ValidationHelper::forgotPasswordRules())) {
+            return $this->validationError($this->validator->getErrors());
+        }
+
+        $data = $this->request->getJSON(true) ?? $this->request->getPost();
+        $user = (new UserModel())->findByEmail($data['email']);
+
+        if ($user && (int) $user['is_active'] === 1) {
+            $token = bin2hex(random_bytes(32));
+
+            (new PasswordResetModel())->insert([
+                'email'      => $user['email'],
+                'token_hash' => hash('sha256', $token),
+                'expires_at' => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            ]);
+
+            (new NotificationModel())->queue(
+                'email',
+                'password_reset',
+                'user',
+                (int) $user['id'],
+                ['token' => $token, 'email' => $user['email']],
+                $user['tenant_id'] !== null ? (int) $user['tenant_id'] : null
+            );
+        }
+
+        return $this->ok(null, 'Jika email terdaftar, link reset password telah dikirim. Cek email Anda dalam beberapa menit.');
+    }
+
+    public function resetPassword()
+    {
+        if (! $this->validate(ValidationHelper::resetPasswordRules())) {
+            return $this->validationError($this->validator->getErrors());
+        }
+
+        $data  = $this->request->getJSON(true) ?? $this->request->getPost();
+        $reset = (new PasswordResetModel())->findValid($data['email'], $data['token']);
+
+        if (! $reset) {
+            return $this->fail('Link reset password tidak valid atau sudah kedaluwarsa.', 422);
+        }
+
+        $userModel = new UserModel();
+        $user      = $userModel->findByEmail($data['email']);
+
+        if (! $user) {
+            return $this->fail('Link reset password tidak valid atau sudah kedaluwarsa.', 422);
+        }
+
+        $userModel->update($user['id'], ['password' => $data['password']]);
+        (new PasswordResetModel())->markUsed((int) $reset['id']);
+
+        // Force re-login everywhere — a leaked-then-reset password
+        // shouldn't leave old sessions valid.
+        (new RefreshTokenModel())->revokeAllForUser((int) $user['id']);
+
+        (new ActivityModel())->log(
+            'password_reset',
+            $user['tenant_id'] !== null ? (int) $user['tenant_id'] : null,
+            (int) $user['id'],
+            'Password direset via lupa password'
+        );
+
+        return $this->ok(null, 'Password berhasil direset. Silakan masuk dengan password baru Anda.');
     }
 
     private function issueTokens(int $userId, ?int $tenantId, string $roleSlug, string $email): array

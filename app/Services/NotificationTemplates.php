@@ -34,6 +34,7 @@ class NotificationTemplates
             'reactivation'         => $this->statusChange($tenantName, $customer, 'diaktifkan kembali'),
             'broadcast'            => $this->broadcast($tenantName, $payload),
             'account_created'      => $this->accountCreated($tenantName, $customer, $payload),
+            'password_reset'       => $this->passwordReset($payload),
             default                => throw new RuntimeException("Tidak ada template untuk tipe notifikasi '{$notification['type']}'."),
         };
     }
@@ -88,6 +89,18 @@ class NotificationTemplates
             . 'Segera login dan disarankan untuk mengganti password Anda. Jangan bagikan pesan ini ke siapa pun.';
 
         return ['subject' => "Akun Pelanggan {$tenantName} Aktif", 'message' => $message];
+    }
+
+    private function passwordReset(array $payload): array
+    {
+        helper('url');
+        $link = base_url('reset-password?email=' . urlencode($payload['email'] ?? '') . '&token=' . urlencode($payload['token'] ?? ''));
+
+        $message = "Ada permintaan reset password untuk akun NetHub Anda.\n\n"
+            . "Klik link berikut untuk atur password baru (berlaku 1 jam):\n{$link}\n\n"
+            . 'Kalau bukan Anda yang meminta ini, abaikan pesan ini.';
+
+        return ['subject' => 'Reset Password NetHub', 'message' => $message];
     }
 
     private function broadcast(string $tenantName, array $payload): array

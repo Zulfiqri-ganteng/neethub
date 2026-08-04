@@ -33,4 +33,20 @@ class ValidationHelper
             'refresh_token' => 'required|string',
         ];
     }
+
+    public static function forgotPasswordRules(): array
+    {
+        return [
+            'email' => 'required|valid_email',
+        ];
+    }
+
+    public static function resetPasswordRules(): array
+    {
+        return [
+            'email'    => 'required|valid_email',
+            'token'    => 'required|string',
+            'password' => 'required|min_length[8]',
+        ];
+    }
 }

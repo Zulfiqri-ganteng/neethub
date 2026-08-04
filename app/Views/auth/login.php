@@ -18,7 +18,10 @@
                     <input id="email" type="email" class="form-control" placeholder="nama@email.com" required autofocus>
                 </div>
                 <div class="mb-3">
-                    <label for="password" class="form-label">Password</label>
+                    <div class="d-flex justify-content-between">
+                        <label for="password" class="form-label">Password</label>
+                        <a href="/forgot-password" class="small">Lupa password?</a>
+                    </div>
                     <input id="password" type="password" class="form-control" placeholder="Password" required minlength="6">
                 </div>
                 <button class="btn btn-primary w-100" type="submit">
