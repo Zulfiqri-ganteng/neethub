@@ -87,7 +87,9 @@ php_errors.log
 #-------------------------
 # Composer
 #-------------------------
-vendor/
+# vendor/ is intentionally committed — Rumahweb hosting has no composer
+# binary available, so dependencies are shipped in the repo instead
+# (same approach as the kangmuslim/muslimin project).
 
 #-------------------------
 # IDE / Development Files

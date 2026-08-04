@@ -20,7 +20,6 @@ LOGFILE="$HOME/deploy/deploy-neethub.log"
 PROJECT="$HOME/public_html/neethub.kangmuslim.com"
 GIT="/usr/local/cpanel/3rdparty/lib/path-bin/git"
 PHP="/usr/local/bin/php"
-COMPOSER="composer"
 
 mkdir -p "$HOME/deploy"
 
@@ -32,12 +31,11 @@ cd "$PROJECT" || { echo "Folder project tidak ditemukan: $PROJECT" >> "$LOGFILE"
 echo "Pull repository..." >> "$LOGFILE"
 $GIT fetch origin               >> "$LOGFILE" 2>&1
 $GIT reset --hard origin/main   >> "$LOGFILE" 2>&1
-# git clean menghapus file untracked, TAPI .env, public/uploads/logos/*,
-# dan vendor/ (kalau sudah ada) di-ignore Git sehingga tetap aman.
+# git clean menghapus file untracked, TAPI .env & public/uploads/logos/*
+# di-ignore Git sehingga tetap aman. vendor/ ikut di-commit ke repo
+# (hosting ini tidak punya composer), jadi ikut ter-reset ke versi repo,
+# bukan file untracked yang bisa kehapus git clean.
 $GIT clean -fd                  >> "$LOGFILE" 2>&1
-
-echo "Install/update dependency..." >> "$LOGFILE"
-$COMPOSER install --no-dev --optimize-autoloader >> "$LOGFILE" 2>&1
 
 echo "Run CI4 migration..." >> "$LOGFILE"
 $PHP spark migrate --all        >> "$LOGFILE" 2>&1
