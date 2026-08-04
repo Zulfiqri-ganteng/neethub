@@ -35,7 +35,7 @@ $routes->group('superadmin', ['namespace' => 'App\Controllers\Web\SuperAdmin'], 
 $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (RouteCollection $routes) {
     $routes->group('auth', function ($routes) {
         $routes->post('register', 'AuthController::register', ['filter' => 'ratelimit:register,10,900']);
-        $routes->post('login', 'AuthController::login', ['filter' => 'ratelimit:login,5,900']);
+        $routes->post('login', 'AuthController::login', ['filter' => 'ratelimit:login,10,900']);
         $routes->post('refresh', 'AuthController::refresh', ['filter' => 'ratelimit:refresh,20,900']);
         $routes->post('logout', 'AuthController::logout', ['filter' => 'jwtauth']);
         $routes->post('forgot-password', 'AuthController::forgotPassword', ['filter' => 'ratelimit:forgot_password,5,900']);
