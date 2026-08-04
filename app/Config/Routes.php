@@ -122,6 +122,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
 
         $routes->get('settings', 'PlatformSettingController::show');
         $routes->put('settings', 'PlatformSettingController::update');
+        $routes->post('settings/test-smtp', 'PlatformSettingController::testSmtp');
     });
 
     $routes->group('customer', ['namespace' => 'App\Controllers\Api\Customer', 'filter' => ['jwtauth:pelanggan', 'tenant']], function ($routes) {

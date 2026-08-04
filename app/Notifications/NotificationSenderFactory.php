@@ -2,7 +2,7 @@
 
 namespace App\Notifications;
 
-use Config\Email as EmailConfig;
+use App\Models\PlatformSettingModel;
 use RuntimeException;
 
 class NotificationSenderFactory
@@ -23,8 +23,10 @@ class NotificationSenderFactory
 
     public static function email(): EmailSenderInterface
     {
-        return (new EmailConfig())->SMTPHost !== ''
-            ? new SmtpEmailSender()
+        $settings = (new PlatformSettingModel())->currentWithDecryptedSmtpPass();
+
+        return ! empty($settings['smtp_host'])
+            ? new SmtpEmailSender($settings)
             : new LogEmailSender();
     }
 

@@ -5,13 +5,14 @@ namespace App\Controllers\Api;
 use App\Helpers\AuthHelper;
 use App\Helpers\ValidationHelper;
 use App\Models\ActivityModel;
-use App\Models\NotificationModel;
 use App\Models\PasswordResetModel;
 use App\Models\PlatformSettingModel;
 use App\Models\RefreshTokenModel;
 use App\Models\RoleModel;
 use App\Models\TenantModel;
 use App\Models\UserModel;
+use App\Notifications\NotificationSenderFactory;
+use App\Services\NotificationTemplates;
 
 class AuthController extends BaseApiController
 {
@@ -213,6 +214,15 @@ class AuthController extends BaseApiController
      * all log in through this same shared endpoint, so one flow covers all
      * of them. Always returns the same generic success message whether or
      * not the email exists, to avoid leaking which emails are registered.
+     *
+     * Sends the email SYNCHRONOUSLY within this request — deliberately not
+     * through the notifications queue/cron (unlike account_created), so the
+     * user gets the email within seconds instead of waiting on the next
+     * `notifications:send` cron tick. A send failure (bad/missing SMTP
+     * config) is logged server-side but never surfaces to the caller — the
+     * generic response must stay generic either way; use the Super Admin
+     * settings page's "Test SMTP" button to actually diagnose delivery
+     * problems, not this endpoint.
      */
     public function forgotPassword()
     {
@@ -232,14 +242,15 @@ class AuthController extends BaseApiController
                 'expires_at' => date('Y-m-d H:i:s', strtotime('+1 hour')),
             ]);
 
-            (new NotificationModel())->queue(
-                'email',
-                'password_reset',
-                'user',
-                (int) $user['id'],
-                ['token' => $token, 'email' => $user['email']],
-                $user['tenant_id'] !== null ? (int) $user['tenant_id'] : null
-            );
+            try {
+                $rendered = (new NotificationTemplates())->passwordReset(['token' => $token, 'email' => $user['email']]);
+                NotificationSenderFactory::email()->send($user['email'], $rendered['subject'], $rendered['message']);
+            } catch (\Throwable $e) {
+                log_message('error', 'Gagal kirim email reset password ke {email}: {error}', [
+                    'email' => $user['email'],
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return $this->ok(null, 'Jika email terdaftar, link reset password telah dikirim. Cek email Anda dalam beberapa menit.');

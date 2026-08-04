@@ -1280,6 +1280,69 @@ tenant- or role-specific.
   equivalent "just wait it out or clear cache" shortcut documented for production, worth remembering
   if it happens again on `neethub.kangmuslim.com`).
 
+### Forgot/reset password addendum — same day, right after deploying: SMTP settings + synchronous send
+
+The user actually tried this on the real `neethub.kangmuslim.com` deployment right after the section
+above shipped — **no email arrived**, because this app has genuinely never had real SMTP configured
+anywhere, ever (confirmed: `NotificationSenderFactory::email()` was falling back to `LogEmailSender`,
+which only writes to `writable/logs/`, never actually sends). Also surfaced along the way: the
+cron/queue design meant even a *working* SMTP config would take up to a minute to actually deliver
+(waiting on the `notifications:send` cron tick), which read as "broken" to a real user watching their
+inbox. The user asked for both fixed together — reusing the domain's own hosting email rather than
+Gmail, decided **A** when given the choice between "switch to direct/synchronous send" (A) vs "rip
+out the feature and start over" (B).
+
+- **`platform_settings` gained SMTP columns** (`smtp_host/port/user/pass/crypto/from_email/from_name`,
+  migration `2026-08-04-100006`) — Super Admin-editable, same pattern as `bank_*`/pricing fields.
+  `smtp_pass` encrypted at rest via a new `PlatformSettingModel::encryptSecrets()` beforeInsert/
+  beforeUpdate callback (same `CryptoHelper` pattern as `TenantModel`'s `whatsapp_token`/
+  `payment_gateway_config`). Blank password on update = "leave unchanged" (same convention as
+  router/PPPoE password fields) — `PlatformSettingController::update()` only overwrites it when a
+  non-empty value is actually submitted.
+- **`SmtpEmailSender` reworked** to take config via constructor (host/port/user/pass/crypto/from) and
+  build a one-off `Services::email($config, false)` instead of relying on the shared/static
+  `Config\Email` (`.env`-only, global, no runtime editability). `NotificationSenderFactory::email()`
+  now reads `PlatformSettingModel::currentWithDecryptedSmtpPass()` instead of `Config\Email` directly
+  — `Config\Email`/`.env`'s `email.*` keys are effectively unused by this app now (framework
+  boilerplate left in place, harmless).
+- **`AuthController::forgotPassword()` no longer queues** — calls
+  `NotificationTemplates::passwordReset()` (now `public`, was `private`) and
+  `NotificationSenderFactory::email()->send()` directly, synchronously, inside the request. Removed
+  the now-dead `password_reset` case from `NotificationTemplates::render()`'s match (unreachable —
+  nothing queues that type anymore) and the matching redaction branch in
+  `NotificationDispatcher::dispatchOne()` (phase 1's `account_created` redaction stays, this app
+  still queues that one). Send failures are caught + `log_message('error', ...)`'d server-side but
+  **never surface to the caller** — the generic anti-enumeration response has to stay generic
+  regardless of whether the email actually went out; that's what the Test SMTP button below is for.
+- **New `POST /api/superadmin/settings/test-smtp`** (`PlatformSettingController::testSmtp`) — tests
+  whatever's currently in the request body (not necessarily saved yet), so a Super Admin can catch a
+  typo'd host/port before committing it. Unlike `forgotPassword`, this endpoint's whole purpose is
+  surfacing the real failure reason, so it does — returns the actual mail-library error message.
+  Blank `smtp_pass` in the test body falls back to whatever's already saved (so re-testing an
+  already-configured account doesn't require retyping the password).
+- **Web**: `superadmin/settings.php` gained a second card — SMTP form (host/port/crypto/user/pass/
+  from name/from email) + "Simpan SMTP" + "Test SMTP" (with a target-email override field, defaults
+  to the logged-in Super Admin's own email) + a badge showing whether SMTP is currently configured.
+- **Real pre-existing bug found and fixed, unrelated to anything built this session**:
+  `SmtpEmailSender`'s failure path had `implode(' ', $email->printDebugger(['headers']))` —
+  `printDebugger()` already returns a `string` (built via its own internal `implode()`), so wrapping
+  it in another `implode()` throws a `TypeError` in PHP 8 (`implode()`'s 2nd arg must be an array).
+  This line existed since whenever `SmtpEmailSender` was first written and **could never have worked
+  correctly** — but nothing ever hit it, because SMTP was never configured anywhere until this
+  session, so the real-`SmtpEmailSender`-with-a-failure code path had literally never executed
+  before. Found by actually testing a real (deliberately wrong) SMTP config against the running dev
+  server, not by code review. Fixed to use the string directly.
+- **Verified against the running dev server, real flow**: saved fake-but-well-formed SMTP settings →
+  confirmed `smtp_pass` stored encrypted (not plaintext) in MySQL directly, confirmed the API
+  response never includes `smtp_pass` (only a `smtp_configured` boolean) → tested `test-smtp` against
+  a real invalid host, hit the `printDebugger()` bug, fixed it, retested → got a real, useful
+  CI4-mail-library error message back → updated settings *without* resending a password → confirmed
+  in MySQL the encrypted password was untouched (same ciphertext length) → called
+  `forgot-password` for a real user against the (deliberately unreachable, fake) saved SMTP host →
+  confirmed the API still returned the same generic success message (no leak) while the real failure
+  reason landed in `writable/logs/log-*.log` server-side, exactly as designed. All test SMTP
+  values/password_resets rows cleared back to blank afterward.
+
 **2026-08-04 — first real deploy activity on `neethub.kangmuslim.com`.** The user pulled this
 session's Stage 13 commits onto the actual Rumahweb hosting (cPanel terminal, path
 `~/public_html/neethub.kangmuslim.com`) and ran `php spark migrate` for real — **this backend is no

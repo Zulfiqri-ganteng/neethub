@@ -80,20 +80,16 @@ class NotificationDispatcher
                 'last_error' => null,
             ];
 
-            // account_created/password_reset both carry a plaintext one-time
-            // secret (password / reset token) so the template can render
-            // it — once actually delivered, no reason to keep it sitting in
-            // the DB in plaintext forever. The reset token is also already
-            // single-use + 1-hour-expiring at the DB level (password_resets),
-            // this is defense in depth on top of that, same as the phase 1
-            // fix for account_created.
+            // account_created carries a plaintext one-time password so the
+            // template can render it — once actually delivered, there's no
+            // reason for it to keep sitting in the DB in plaintext forever.
+            // (password_reset used to go through this same queue and had
+            // the equivalent fix here, but it now sends synchronously from
+            // AuthController::forgotPassword and never reaches this queue
+            // at all — see Stage 13's CLAUDE.md notes.)
             if ($notification['type'] === 'account_created') {
                 $redactedPayload = json_decode($notification['payload'], true) ?? [];
                 $redactedPayload['password'] = '[redacted-after-send]';
-                $updates['payload'] = json_encode($redactedPayload);
-            } elseif ($notification['type'] === 'password_reset') {
-                $redactedPayload = json_decode($notification['payload'], true) ?? [];
-                $redactedPayload['token'] = '[redacted-after-send]';
                 $updates['payload'] = json_encode($redactedPayload);
             }
 

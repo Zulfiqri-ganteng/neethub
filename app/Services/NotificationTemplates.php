@@ -34,7 +34,6 @@ class NotificationTemplates
             'reactivation'         => $this->statusChange($tenantName, $customer, 'diaktifkan kembali'),
             'broadcast'            => $this->broadcast($tenantName, $payload),
             'account_created'      => $this->accountCreated($tenantName, $customer, $payload),
-            'password_reset'       => $this->passwordReset($payload),
             default                => throw new RuntimeException("Tidak ada template untuk tipe notifikasi '{$notification['type']}'."),
         };
     }
@@ -91,7 +90,12 @@ class NotificationTemplates
         return ['subject' => "Akun Pelanggan {$tenantName} Aktif", 'message' => $message];
     }
 
-    private function passwordReset(array $payload): array
+    /**
+     * Public — unlike the other templates, this one is also called directly
+     * (not through the notifications queue) by AuthController::forgotPassword,
+     * which sends synchronously rather than queuing + waiting on cron.
+     */
+    public function passwordReset(array $payload): array
     {
         helper('url');
         $link = base_url('reset-password?email=' . urlencode($payload['email'] ?? '') . '&token=' . urlencode($payload['token'] ?? ''));

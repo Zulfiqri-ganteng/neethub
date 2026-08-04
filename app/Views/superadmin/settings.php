@@ -4,14 +4,14 @@
 <div class="row">
     <div class="col-12">
         <h1 class="fs-3 mb-1">Pengaturan Platform</h1>
-        <p class="mb-4 text-muted">Harga langganan, masa trial, dan masa tenggang berlaku untuk semua tenant</p>
+        <p class="mb-4 text-muted">Harga langganan, masa trial, masa tenggang, dan pengiriman email berlaku untuk semua tenant</p>
     </div>
 </div>
 
 <div id="pageError" class="alert alert-danger d-none"></div>
 <div id="pageSuccess" class="alert alert-success d-none"></div>
 
-<div class="card" style="max-width: 560px;">
+<div class="card mb-3" style="max-width: 560px;">
     <div class="card-body p-4">
         <form id="settingsForm">
             <div class="mb-3">
@@ -47,6 +47,63 @@
     </div>
 </div>
 
+<div class="card" style="max-width: 560px;">
+    <div class="card-body p-4">
+        <h5 class="mb-1">Pengiriman Email (SMTP)</h5>
+        <p class="text-muted small mb-3">
+            Dipakai untuk email sistem (mis. reset password) ke semua role. Isi pakai email domain/hosting kamu sendiri.
+            <span id="smtpConfiguredBadge"></span>
+        </p>
+        <form id="smtpForm">
+            <div class="mb-3">
+                <label class="form-label">SMTP Host</label>
+                <input type="text" class="form-control" id="smtpHost" placeholder="mis. mail.kangmuslim.com">
+            </div>
+            <div class="row">
+                <div class="col-6 mb-3">
+                    <label class="form-label">Port</label>
+                    <input type="number" class="form-control" id="smtpPort" placeholder="587">
+                </div>
+                <div class="col-6 mb-3">
+                    <label class="form-label">Enkripsi</label>
+                    <select class="form-select" id="smtpCrypto">
+                        <option value="tls">TLS</option>
+                        <option value="ssl">SSL</option>
+                        <option value="">Tanpa enkripsi</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Username SMTP</label>
+                <input type="text" class="form-control" id="smtpUser" placeholder="mis. noreply@neethub.kangmuslim.com">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password SMTP</label>
+                <input type="password" class="form-control" id="smtpPass" placeholder="Kosongkan jika tidak diganti">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Nama Pengirim</label>
+                <input type="text" class="form-control" id="smtpFromName" placeholder="NetHub">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Email Pengirim</label>
+                <input type="email" class="form-control" id="smtpFromEmail" placeholder="noreply@neethub.kangmuslim.com">
+            </div>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Simpan SMTP</button>
+                <button type="button" class="btn btn-outline-secondary" onclick="testSmtp()">
+                    <span id="testSmtpSpinner" class="spinner-border spinner-border-sm d-none me-1"></span>
+                    Test SMTP
+                </button>
+            </div>
+            <div class="mt-3">
+                <label class="form-label small">Kirim email percobaan ke</label>
+                <input type="email" class="form-control form-control-sm" id="testSmtpTarget" placeholder="Kosongkan untuk kirim ke email Anda sendiri">
+            </div>
+        </form>
+    </div>
+</div>
+
 <?= $this->endSection() ?>
 
 <?= $this->section('scripts') ?>
@@ -55,7 +112,7 @@ function showMessage(type, msg) {
     const el = document.getElementById(type === 'error' ? 'pageError' : 'pageSuccess');
     el.textContent = msg;
     el.classList.remove('d-none');
-    setTimeout(() => el.classList.add('d-none'), 5000);
+    setTimeout(() => el.classList.add('d-none'), 8000);
 }
 
 async function loadSettings() {
@@ -68,6 +125,16 @@ async function loadSettings() {
     document.getElementById('bankName').value = body.data.bank_name || '';
     document.getElementById('bankAccountNumber').value = body.data.bank_account_number || '';
     document.getElementById('bankAccountName').value = body.data.bank_account_name || '';
+
+    document.getElementById('smtpHost').value = body.data.smtp_host || '';
+    document.getElementById('smtpPort').value = body.data.smtp_port || 587;
+    document.getElementById('smtpCrypto').value = body.data.smtp_crypto ?? 'tls';
+    document.getElementById('smtpUser').value = body.data.smtp_user || '';
+    document.getElementById('smtpFromName').value = body.data.smtp_from_name || '';
+    document.getElementById('smtpFromEmail').value = body.data.smtp_from_email || '';
+    document.getElementById('smtpConfiguredBadge').innerHTML = body.data.smtp_configured
+        ? '<span class="badge bg-success-subtle text-success">Sudah diatur</span>'
+        : '<span class="badge bg-secondary-subtle text-secondary">Belum diatur</span>';
 }
 
 document.getElementById('settingsForm').addEventListener('submit', async (e) => {
@@ -88,6 +155,49 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
 
     showMessage(body.success ? 'success' : 'error', body.message);
 });
+
+function smtpFormValues() {
+    return {
+        smtp_host: document.getElementById('smtpHost').value,
+        smtp_port: document.getElementById('smtpPort').value || 587,
+        smtp_crypto: document.getElementById('smtpCrypto').value,
+        smtp_user: document.getElementById('smtpUser').value,
+        smtp_pass: document.getElementById('smtpPass').value,
+        smtp_from_name: document.getElementById('smtpFromName').value,
+        smtp_from_email: document.getElementById('smtpFromEmail').value,
+    };
+}
+
+document.getElementById('smtpForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const body = await nethubFetch('/api/superadmin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(smtpFormValues()),
+    });
+
+    showMessage(body.success ? 'success' : 'error', body.message);
+    document.getElementById('smtpPass').value = '';
+    if (body.success) loadSettings();
+});
+
+async function testSmtp() {
+    const spinner = document.getElementById('testSmtpSpinner');
+    spinner.classList.remove('d-none');
+
+    const body = await nethubFetch('/api/superadmin/settings/test-smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            ...smtpFormValues(),
+            to_email: document.getElementById('testSmtpTarget').value || undefined,
+        }),
+    });
+
+    spinner.classList.add('d-none');
+    showMessage(body.success ? 'success' : 'error', body.message);
+}
 
 loadSettings();
 </script>
