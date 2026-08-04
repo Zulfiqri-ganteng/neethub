@@ -54,3 +54,31 @@ async function nethubFetch(url, options = {}, isRetry = false) {
 
     return res.json();
 }
+
+// Stage 13 phase 5 — swaps the sidebar's hardcoded "NetHub" text/icon for
+// whichever tenant is actually logged in. Opt-in: only layouts that call
+// this (dashboard.php, customer.php) get it — layouts/super_admin.php
+// deliberately does NOT, since /api/brand returns the generic platform
+// default for a super_admin (no tenant), which would overwrite "NetHub SA"
+// with plain "NetHub" and lose the "you're in the admin panel" cue.
+async function nethubApplyBranding() {
+    try {
+        const body = await nethubFetch('/api/brand');
+        if (!body.success) return;
+
+        const textEl = document.getElementById('sidebarLogoText');
+        if (textEl) textEl.textContent = body.data.name;
+
+        if (body.data.logo) {
+            const imgEl = document.getElementById('sidebarLogoImg');
+            const iconEl = document.getElementById('sidebarLogoIcon');
+            if (imgEl && iconEl) {
+                imgEl.src = '/' + body.data.logo;
+                imgEl.classList.remove('d-none');
+                iconEl.classList.add('d-none');
+            }
+        }
+    } catch (err) {
+        // Branding is cosmetic — never let a failed lookup break the page.
+    }
+}

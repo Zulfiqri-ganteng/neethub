@@ -42,6 +42,9 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->post('reset-password', 'AuthController::resetPassword', ['filter' => 'ratelimit:reset_password,10,900']);
     });
 
+    // Stage 13 phase 5 — cross-role branding lookup, any authenticated role.
+    $routes->get('brand', 'BrandController::index', ['filter' => 'jwtauth']);
+
     // Owner + Admin + Teknisi + Kasir share the /api/owner/* surface; each
     // endpoint narrows further with a 'permission:<slug>' filter so e.g. a
     // Kasir can view customers but can't delete them.

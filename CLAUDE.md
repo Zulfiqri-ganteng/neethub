@@ -66,10 +66,16 @@ context without depending on anything outside the project.
 9. **Testing (unit/integration/E2E)** — ⬜ not started
 10. **Optimization (caching, query tuning)** — ⬜ not started
 11. **Deployment (shared hosting)** — ⬜ not started
-12. **Multi-tenant SaaS platform (self-serve billing + customer self-service)** — 🟡 in progress
-    (Stage 13 phase 1-3/5 done: customer account auto-provisioning + portal toggle, platform
-    billing engine + Super Admin panel, web register + owner platform-billing page). Remaining:
-    Android (phase 4), dynamic tenant branding (phase 5). See Stage 13.
+12. **Multi-tenant SaaS platform (self-serve billing + customer self-service)** — 🟡 in progress.
+    Backend + web (phases 1-3) done: customer account auto-provisioning + portal toggle, platform
+    billing engine + Super Admin panel, web register + owner platform-billing page. Also done same
+    session, ad-hoc (not originally scoped in phases 1-5 but requested mid-deployment): forgot/reset
+    password (all roles) + Super Admin-editable SMTP settings with a test-send button, and phase 5's
+    **web** half (dynamic tenant name/logo in the sidebar + report PDF title — found via the user's
+    real first click-through test on `neethub.kangmuslim.com`). **Remaining: Android — all of
+    Stage 13 phase 4, plus phase 5's Android half (dynamic branding in `nethub_owner`'s app
+    shell)** — nothing Android-side has started yet. See Stage 13 in full below, and
+    `C:\Flutter-NEETHUB\CLAUDE.md` for the Flutter-specific tracking.
 
 ### Stage 1 — Database Design (done)
 
@@ -1342,6 +1348,61 @@ out the feature and start over" (B).
   confirmed the API still returned the same generic success message (no leak) while the real failure
   reason landed in `writable/logs/log-*.log` server-side, exactly as designed. All test SMTP
   values/password_resets rows cleared back to blank afterward.
+
+### Phase 5 (web) — dynamic tenant branding + real bug reports from live testing — done (2026-08-04)
+
+The user did their first real click-through testing on `neethub.kangmuslim.com` via Chrome on an
+Android phone (not the Flutter app — the **web** frontend) and reported 3 things back, all
+confirmed real:
+
+1. Renamed the tenant to "TEST" in Settings → sidebar still said "NetHub" (exactly the gap this
+   file already flagged earlier in Stage 13's planning notes, now confirmed by an actual user hitting
+   it).
+2. Report PDF title also still said "NetHub" (same known gap, `Views/pdf/report.php`).
+3. **Logo upload had "no save button"** — this one turned out to be real but different from what it
+   sounded like: an "Unggah Logo" button *did* exist (`owner/settings.php`), but the logo section's
+   layout (`d-flex align-items-center gap-3`, fixed 80px preview box + no wrap) had no responsive
+   fallback for a narrow phone screen — plausible the button was getting squeezed/pushed off-screen
+   on mobile. Fixed regardless of exact root cause: the container now stacks vertically below the
+   `sm` breakpoint (`flex-column flex-sm-row`) and its button row wraps (`flex-wrap`).
+
+User also asked for the Settings page to be reorganized into tabs (was one long scrolling page with
+6 stacked cards) and for both `CLAUDE.md` files to get a full pass so any future AI session — backend
+or Flutter — has complete context without re-deriving any of this session's decisions.
+
+**What shipped:**
+- **New `GET /api/brand`** (`Api\BrandController`, filter `jwtauth` only — deliberately not
+  `Api\Owner\SettingsController::show`, which needs `permission:settings.manage` and would 403 for
+  admin/teknisi/kasir/pelanggan on every single page load just to fetch branding). Returns
+  `{name, logo}` — the tenant's for any tenant-scoped role, or the generic `{name: 'NetHub', logo:
+  null}` default for `super_admin` (no tenant).
+- **`public/js/nethub-auth.js`** gained `nethubApplyBranding()` — fetches `/api/brand`, swaps the
+  sidebar's `#sidebarLogoText` text and (if a logo is set) `#sidebarLogoImg`/`#sidebarLogoIcon`.
+  **Opt-in, not automatic** — only `layouts/dashboard.php` and `layouts/customer.php` call it (added
+  one `<script>nethubApplyBranding();</script>` line each, after `nethub-auth.js` loads).
+  `layouts/super_admin.php` deliberately does **not** call it — `/api/brand` returns the generic
+  default for a super_admin, which would overwrite "NetHub SA" with plain "NetHub" and lose the
+  "you're in the admin panel, not a tenant" visual cue. `owner/settings.php`'s profile-save and
+  logo-upload/remove handlers now also call `nethubApplyBranding()` directly after a successful
+  change, so the sidebar updates the instant you save — not just on next page load.
+- **`ReportController::exportPdf()`** now fetches the tenant and passes `tenantName` into
+  `pdf/report.php`, which uses it instead of a hardcoded `"NetHub"` string in the meta line.
+  (Invoice PDF already did this correctly before this session — only the report export had the gap.)
+- **`owner/settings.php` rebuilt with Bootstrap tabs** (`nav-tabs` + `tab-content`, 6 tabs: Profil
+  Usaha / Logo & Brand / Bank & QRIS / WhatsApp / Payment Gateway / Backup & Restore) — same
+  `bootstrap.js` bundle already loaded via `main.js` (proven working elsewhere, e.g. modals in
+  `superadmin/tenant_detail.php`), no new dependency. All existing element IDs/JS functions kept
+  unchanged, only the HTML wrapper changed — so nothing about how the forms submit/validate/save
+  changed, purely a layout restructure.
+- **Verified against the running dev server, real flow**: called `/api/brand` before/after renaming
+  melati to "TEST" via the real settings API → confirmed the response changed live. Exported a real
+  customer report PDF while the tenant was named "TEST", extracted its actual text via `pdftotext`
+  → confirmed the line read `"TEST — dicetak ..."` instead of `"NetHub — dicetak ..."`. Rendered
+  `/settings` and confirmed `sidebarLogoText`/`nethubApplyBranding()` are present in the HTML with no
+  leaked PHP warnings. Tenant name restored to `RT/RW Net Melati` afterward — demo state left clean.
+- **Not done**: Android side of dynamic branding (`nethub_owner`'s app bar/drawer still hardcode
+  "NetHub"/"NetHub Owner") — this session's fix only covers web, since that's what the user actually
+  tested. Tracked as part of Stage 13 phase 4/5 in `C:\Flutter-NEETHUB\CLAUDE.md` — see that file.
 
 **2026-08-04 — first real deploy activity on `neethub.kangmuslim.com`.** The user pulled this
 session's Stage 13 commits onto the actual Rumahweb hosting (cPanel terminal, path

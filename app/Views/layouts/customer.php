@@ -41,8 +41,9 @@ $currentPath = '/' . trim(uri_string(), '/');
 <aside id="sidebar" class="sidebar">
     <div class="logo-area">
         <a href="/customer/dashboard" class="d-inline-flex align-items-center text-decoration-none">
-            <i class="ti ti-wifi fs-4 text-primary"></i>
-            <span class="logo-text ms-2 fw-bold">NetHub</span>
+            <i id="sidebarLogoIcon" class="ti ti-wifi fs-4 text-primary"></i>
+            <img id="sidebarLogoImg" src="" alt="Logo" class="d-none" style="height: 28px; max-width: 40px; object-fit: contain;">
+            <span id="sidebarLogoText" class="logo-text ms-2 fw-bold">NetHub</span>
         </a>
     </div>
     <ul class="nav flex-column">
@@ -65,6 +66,7 @@ $currentPath = '/' . trim(uri_string(), '/');
 
 <script src="/js/main.js" type="module"></script>
 <script src="/js/nethub-auth.js"></script>
+<script>nethubApplyBranding();</script>
 <?= $this->renderSection('scripts') ?>
 </body>
 </html>

@@ -3,6 +3,8 @@
 namespace App\Controllers\Api\Owner;
 
 use App\Controllers\Api\BaseApiController;
+use App\Helpers\TenantHelper;
+use App\Models\TenantModel;
 use App\Services\PdfService;
 use App\Services\ReportService;
 
@@ -116,8 +118,15 @@ class ReportController extends BaseApiController
 
     private function exportPdf(string $type, string $title, array $headers, array $rows)
     {
-        $html = view('pdf/report', ['title' => $title, 'headers' => $headers, 'rows' => $rows]);
-        $pdf  = (new PdfService())->render($html);
+        $tenant = (new TenantModel())->find(TenantHelper::requireTenantId());
+
+        $html = view('pdf/report', [
+            'title'      => $title,
+            'headers'    => $headers,
+            'rows'       => $rows,
+            'tenantName' => $tenant['name'] ?? 'NetHub',
+        ]);
+        $pdf = (new PdfService())->render($html);
 
         return $this->response->download('laporan_' . $type . '_' . date('Ymd_His') . '.pdf', $pdf);
     }

@@ -14,7 +14,7 @@
 </head>
 <body>
     <h1><?= esc($title) ?></h1>
-    <div class="meta">NetHub &mdash; dicetak <?= date('d/m/Y H:i') ?></div>
+    <div class="meta"><?= esc($tenantName ?? 'NetHub') ?> &mdash; dicetak <?= date('d/m/Y H:i') ?></div>
     <table>
         <thead>
             <tr>
