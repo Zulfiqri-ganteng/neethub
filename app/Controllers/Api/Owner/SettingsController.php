@@ -16,10 +16,10 @@ class SettingsController extends BaseApiController
     public function update()
     {
         $rules = [
-            'name'            => 'permit_empty|min_length[3]|max_length[150]',
-            'email'           => 'permit_empty|valid_email',
-            'whatsapp'        => 'permit_empty|max_length[20]',
-            'payment_gateway' => 'permit_empty|in_list[midtrans,xendit]',
+            'name'                     => 'permit_empty|min_length[3]|max_length[150]',
+            'email'                    => 'permit_empty|valid_email',
+            'whatsapp'                 => 'permit_empty|max_length[20]',
+            'payment_gateway'          => 'permit_empty|in_list[midtrans,xendit]',
         ];
 
         if (! $this->validate($rules)) {
@@ -30,8 +30,14 @@ class SettingsController extends BaseApiController
         $update = array_intersect_key($data, array_flip([
             'name', 'address', 'whatsapp', 'email',
             'bank_name', 'bank_account_number', 'bank_account_name', 'qris_static_code',
-            'payment_gateway', 'whatsapp_token',
+            'payment_gateway', 'whatsapp_token', 'customer_portal_enabled',
         ]));
+
+        // Arrives as a JSON bool/int/string from the two clients (web JS,
+        // Flutter) — normalize to the 0/1 the TINYINT column expects.
+        if (array_key_exists('customer_portal_enabled', $update)) {
+            $update['customer_portal_enabled'] = filter_var($update['customer_portal_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+        }
 
         // payment_gateway_config arrives as a JSON object (its shape
         // depends on which gateway) — stringify before the model encrypts

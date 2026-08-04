@@ -7,6 +7,9 @@ use App\Helpers\TenantHelper;
 use App\Models\ActivityModel;
 use App\Models\NotificationModel;
 use App\Models\PackageModel;
+use App\Models\RoleModel;
+use App\Models\TenantModel;
+use App\Models\UserModel;
 use App\Repositories\CustomerRepository;
 use App\Services\RouterService;
 
@@ -90,7 +93,88 @@ class CustomerController extends BaseApiController
             }
         }
 
-        return $this->created([...$customer, 'router_sync' => $routerSync], 'Pelanggan berhasil ditambahkan.');
+        // Same best-effort contract as router sync above: a pelanggan login
+        // is a nice-to-have on top of an already-valid customer record, not
+        // a precondition for one. See Stage 13 in this repo's CLAUDE.md.
+        $portalAccount = $this->provisionPortalAccount($customer, TenantHelper::requireTenantId());
+        if ($portalAccount === 'created') {
+            $customer = $this->customers->find($id);
+        }
+
+        return $this->created(
+            [...$customer, 'router_sync' => $routerSync, 'portal_account' => $portalAccount],
+            'Pelanggan berhasil ditambahkan.'
+        );
+    }
+
+    /**
+     * Auto-provisions a `pelanggan`-role login for a newly created customer,
+     * with a random password sent via the existing WhatsApp notification
+     * queue — never blocks or fails customer creation itself.
+     *
+     * @return string One of: skipped_disabled|skipped_no_email|skipped_email_taken|created
+     */
+    private function provisionPortalAccount(array $customer, int $tenantId): string
+    {
+        $tenant = (new TenantModel())->find($tenantId);
+        if (empty($tenant['customer_portal_enabled'])) {
+            return 'skipped_disabled';
+        }
+
+        if (empty($customer['email'])) {
+            return 'skipped_no_email';
+        }
+
+        $userModel = new UserModel();
+        if ($userModel->findByEmail($customer['email'])) {
+            return 'skipped_email_taken';
+        }
+
+        $pelangganRole = (new RoleModel())->findBySlug('pelanggan');
+        if (! $pelangganRole) {
+            return 'skipped_no_email';
+        }
+
+        $password = $this->generatePassword();
+
+        $userId = $userModel->insert([
+            'tenant_id' => $tenantId,
+            'role_id'   => $pelangganRole['id'],
+            'name'      => $customer['name'],
+            'email'     => $customer['email'],
+            'phone'     => $customer['phone'] ?? null,
+            'password'  => $password,
+            'is_active' => 1,
+        ]);
+
+        $this->customers->update((int) $customer['id'], ['user_id' => $userId]);
+
+        (new NotificationModel())->queue(
+            'whatsapp',
+            'account_created',
+            'customer',
+            (int) $customer['id'],
+            ['email' => $customer['email'], 'password' => $password],
+            $tenantId
+        );
+
+        return 'created';
+    }
+
+    /**
+     * Random, WhatsApp-readable password: excludes visually ambiguous
+     * characters (0/O, 1/l/I) since it's read off a phone screen, not typed
+     * from a password manager.
+     */
+    private function generatePassword(int $length = 10): string
+    {
+        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+        $password = '';
+        for ($i = 0; $i < $length; $i++) {
+            $password .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+
+        return $password;
     }
 
     public function update($id = null)

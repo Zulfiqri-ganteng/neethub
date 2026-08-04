@@ -33,6 +33,7 @@ class NotificationTemplates
             'suspend'              => $this->statusChange($tenantName, $customer, 'disuspend sementara'),
             'reactivation'         => $this->statusChange($tenantName, $customer, 'diaktifkan kembali'),
             'broadcast'            => $this->broadcast($tenantName, $payload),
+            'account_created'      => $this->accountCreated($tenantName, $customer, $payload),
             default                => throw new RuntimeException("Tidak ada template untuk tipe notifikasi '{$notification['type']}'."),
         };
     }
@@ -74,6 +75,19 @@ class NotificationTemplates
             . 'Hubungi kami jika ada pertanyaan.';
 
         return ['subject' => 'Status Layanan Diperbarui', 'message' => $message];
+    }
+
+    private function accountCreated(string $tenantName, ?array $customer, array $payload): array
+    {
+        $name     = $customer['name'] ?? 'Pelanggan';
+        $email    = $payload['email'] ?? '-';
+        $password = $payload['password'] ?? '-';
+
+        $message = "Halo {$name}, akun Anda untuk memantau & membayar tagihan {$tenantName} sudah aktif.\n\n"
+            . "Login: {$email}\nPassword: {$password}\n\n"
+            . 'Segera login dan disarankan untuk mengganti password Anda. Jangan bagikan pesan ini ke siapa pun.';
+
+        return ['subject' => "Akun Pelanggan {$tenantName} Aktif", 'message' => $message];
     }
 
     private function broadcast(string $tenantName, array $payload): array

@@ -73,12 +73,23 @@ class NotificationDispatcher
                 $sender->send($recipient, $rendered['subject'], $rendered['message']);
             }
 
-            $this->notifications->update($notification['id'], [
+            $updates = [
                 'status'     => 'sent',
                 'attempts'   => $notification['attempts'] + 1,
                 'sent_at'    => date('Y-m-d H:i:s'),
                 'last_error' => null,
-            ]);
+            ];
+
+            // account_created carries a plaintext one-time password so the
+            // template can render it — once actually delivered, there's no
+            // reason for it to keep sitting in the DB in plaintext forever.
+            if ($notification['type'] === 'account_created') {
+                $redactedPayload = json_decode($notification['payload'], true) ?? [];
+                $redactedPayload['password'] = '[redacted-after-send]';
+                $updates['payload'] = json_encode($redactedPayload);
+            }
+
+            $this->notifications->update($notification['id'], $updates);
 
             return 'sent';
         } catch (Throwable $e) {

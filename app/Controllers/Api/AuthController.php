@@ -98,6 +98,13 @@ class AuthController extends BaseApiController
             if (! $tenant || $tenant['status'] !== 'active') {
                 return $this->forbidden('Akun tenant Anda sedang di-suspend. Hubungi Super Admin.');
             }
+
+            // A tenant can turn the customer portal off after pelanggan
+            // accounts already exist (Stage 13) — don't leave those accounts
+            // able to log in as if nothing changed.
+            if ($user['role_slug'] === 'pelanggan' && empty($tenant['customer_portal_enabled'])) {
+                return $this->forbidden('Login pelanggan sedang dinonaktifkan oleh penyedia layanan Anda. Hubungi mereka langsung.');
+            }
         }
 
         $userModel->update($user['id'], ['last_login_at' => date('Y-m-d H:i:s')]);

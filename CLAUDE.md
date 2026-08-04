@@ -56,13 +56,19 @@ context without depending on anything outside the project.
 6. **Notifications (WhatsApp/Email/Push queue)** — ✅ done (⚠️ WhatsApp/Email senders not validated
    against real gateway/SMTP credentials — see Stage 6 notes; Push is a stub, needs the Flutter
    stage's device-token registration first)
-7. **Web Frontend (Bootstrap 5 dashboard)** — ✅ done — Owner + Customer sides both feature-complete,
-   see Stage 7 notes
-8. **Flutter Owner app** (`C:\Flutter-NEETHUB`) — ⬜ not started
-9. **Flutter Customer app** (`C:\Flutter-NEETHUB`) — ⬜ not started
-10. **Testing (unit/integration/E2E)** — ⬜ not started
-11. **Optimization (caching, query tuning)** — ⬜ not started
-12. **Deployment (shared hosting)** — ⬜ not started
+7. **Web Frontend (Bootstrap 5 dashboard)** — ✅ done — Owner side feature-complete; Customer side's
+   *pages* are feature-complete but **⚠️ has no real account-provisioning path** — see the 2026-08-04
+   correction note right after Stage 7's addendum below, and Stage 13.
+8. **Flutter apps** (`C:\Flutter-NEETHUB`) — **status lives in that repo's own `CLAUDE.md`, not here**
+   — don't hardcode ✅/⬜ for this item in this file, it will go stale. As of 2026-08-04: Owner app's
+   screen coverage is done (verified `flutter analyze` only, no device testing yet); Customer app
+   work is starting under Stage 13 below (merged into the Owner app, not a separate app — see Stage 13).
+9. **Testing (unit/integration/E2E)** — ⬜ not started
+10. **Optimization (caching, query tuning)** — ⬜ not started
+11. **Deployment (shared hosting)** — ⬜ not started
+12. **Multi-tenant SaaS platform (self-serve billing + customer self-service)** — 🟡 in progress
+    (Stage 13 phase 1-2/5 done: customer account auto-provisioning + portal toggle, platform
+    billing engine + Super Admin panel). See Stage 13.
 
 ### Stage 1 — Database Design (done)
 
@@ -746,6 +752,18 @@ Owner-only and doesn't block any user's actual workflow) for that reason.
 
 Sidebar-wise this closes out Stage 7's customer side entirely.
 
+**2026-08-04 correction — the pages above were verified using a seeded demo account, and that
+masked a real gap.** `DemoTenantSeeder.php` inserts `pelanggan`-role `users` rows directly into the
+DB for the three demo customers — that's how "logged in as a real customer" above was possible.
+But **no controller anywhere creates a `pelanggan`-role account** at runtime: `AuthController::register`
+only ever creates `owner` accounts (tenant self-signup), and `CustomerController::create` (Owner
+adding a customer's billing/PPPoE profile) never touches `users` or populates `customers.user_id`
+(that FK has existed since Stage 1's migration, `SET NULL` on delete, clearly intended for this,
+just never wired up). **Net effect: today, zero real customers can ever get a login** — the
+Customer web portal is fully built but unreachable outside the seeder. Caught 2026-08-04 while
+scoping Stage 13 (below) from the Flutter side — flagging here so this file doesn't keep claiming
+"Customer side feature-complete" without the caveat. Fix is Stage 13's provisioning work.
+
 **Monitoring page — done**: `app/Views/owner/monitoring.php` +
 `app/Controllers/Web/MonitoringController.php` (`GET /monitoring`, sidebar slot added — it wasn't
 even in the menu array before this). Two independent sections: **Pelanggan Online** (reads the
@@ -927,6 +945,248 @@ User asked for a complete, from-scratch usage tutorial as a PDF, kept inside the
   after the fix: zero replacement characters anywhere in the extracted text.
 - **Verified**: 18-page PDF generated successfully, full text extracted via `pdftotext -layout` and
   read through end to end to confirm every chapter/table/callout box rendered as intended.
+
+### Stage 13 — Multi-tenant SaaS platform: customer self-service + platform billing (planned 2026-08-04, not started)
+
+**Written from a session in the Flutter repo** (`C:\Flutter-NEETHUB`), during a planning discussion
+with the user about turning this from "one business's internal tool" into an actual multi-tenant
+SaaS sold to WiFi/ISP businesses across Indonesia via Play Store. Recording the full decision here
+— not just in the Flutter repo's `CLAUDE.md` — specifically so a backend-only session picking this
+up later has complete context and doesn't duplicate or contradict any of it. If you're working
+backend-side and this is your first time seeing this section, **read all of it before touching
+anything Customer-portal or billing-related** — several silent assumptions elsewhere in this file
+(e.g. Stage 7's "Customer side feature-complete") are now known-stale, corrected above.
+
+**Decisions locked in by the user (2026-08-04), do not re-litigate without asking:**
+1. Flutter side stays **one app** (`nethub_owner`, no separate `nethub_customer`) — role-based UI
+   after login, same pattern as this backend's own `/login` redirect-by-role. Renaming the Flutter
+   app away from "Owner-only" branding is a Flutter-repo concern, not tracked here.
+2. Platform subscription billing (what a *tenant owner* pays *you*, the platform operator, to use
+   NetHub) uses the **same payment rails already built for tenant→customer billing** — the existing
+   Midtrans/Xendit gateway abstraction and/or manual transfer + admin verification. **Explicitly
+   NOT Google Play Billing** — the user initially wanted Play Billing but agreed once told it's
+   Android-only (can't run on the web side at all) and would break the "web and Android 100%
+   identical" requirement they consider non-negotiable, plus Google's 15-30% cut.
+3. Trial: `tenants.plan`/`tenants.trial_ends_at` already exist in the Stage 1 schema and already get
+   set on signup — just never enforced or billed against. 1-month trial, then billing kicks in.
+   Exact price (user's example: Rp100.000/bulan) and cycle length should be **configurable**, not
+   hardcoded — someone selling this to many different WiFi businesses will want to change pricing
+   without a redeploy.
+4. Customer self-service (pelanggan login + self-pay) must be **flexible per tenant** — some ISP
+   owners may not want it. Needs a per-tenant on/off setting (new column, e.g.
+   `tenants.customer_portal_enabled`), defaulting to a sane value TBD (leaning ON, since "flexible
+   and usable by anyone" was the user's explicit priority and an unused feature is lower-risk than
+   a missing one — confirm before shipping).
+5. Customer account provisioning: **auto-generate a password and send it via the existing WhatsApp
+   notification pipeline** (`NotificationModel::queue('whatsapp', ...)` + `SendNotifications` +
+   `NotificationDispatcher`, already fully wired since Stage 6 — reuse, don't rebuild) the moment an
+   Owner/Admin/Kasir saves a new customer record. No self-registration flow for pelanggan — the
+   Owner is always the one entering the customer's data first (matches how `CustomerController::create`
+   already works today).
+
+**Real gap found while scoping this (see the 2026-08-04 correction note above, in the Stage 7
+addendum)**: there is currently **no path at all** for a `pelanggan`-role `users` row to be created
+outside `DemoTenantSeeder.php`. `customers.user_id` has sat unpopulated since Stage 1. This is the
+biggest single piece of net-new backend work here — everything else (portal toggle, platform
+billing) is smaller in comparison.
+
+**Scope breakdown (implement in this order, one sub-phase at a time, pause for review between each
+— same one-stage-at-a-time rule as the rest of this file):**
+
+1. **Backend — customer account auto-provisioning + portal toggle**
+   - Migration: add `tenants.customer_portal_enabled` (boolean).
+   - `CustomerController::create` (and only there — not `update`): when the tenant's toggle is on,
+     create a `users` row (role `pelanggan`, random password, `is_active=1`), set the new
+     customer's `user_id`, then queue a WhatsApp notification with the login (email) + generated
+     password. When the toggle is off, skip account creation entirely — customer record still
+     works exactly as it does today (no login, no self-pay, Owner does everything manually — the
+     existing supported flow, must keep working unchanged).
+   - `/api/customer/*` routes (login already shared via `/api/auth/login`) should reject a
+     `pelanggan` login attempt with a clear message if their tenant has since turned the toggle
+     off (a tenant could flip it off after accounts already exist — don't silently 500).
+   - `SettingsController::show/update` (owner-facing): expose/accept `customer_portal_enabled`.
+
+2. **Backend — platform subscription/billing**
+   - New table (e.g. `platform_invoices` or similar — mirror `invoices`' shape/conventions, this is
+     billing but for a different payer: the tenant itself, not one of the tenant's customers).
+   - A `PlatformBillingService` (mirror `InvoiceService`'s patterns) + a cron command (mirror
+     `GenerateInvoices`) that, once a tenant's trial ends, starts generating monthly platform
+     invoices against the tenant.
+   - Needs *some* place for you (the platform operator, `super_admin` role — already exists as a
+     role slug, checked in `AuthController` line ~96, but has **zero panel/controllers built**) to
+     see all tenants + their platform billing status and manually verify manual-transfer payments.
+     This is realistically a small new Super Admin panel — scope it explicitly before starting,
+     it's bigger than it sounds (this file has never built anything super_admin-facing before).
+   - Gateway/manual payment reuses the existing `PaymentGateways/` abstraction and
+     `PaymentService`-style verify flow — don't build a second parallel payment system.
+   - Enforcement: what happens when a tenant's platform invoice goes unpaid past due date? (Read-only
+     mode? Full lockout? Grace period?) **Not yet decided — ask the user before building enforcement,
+     it's a real product/business call, not a technical one.**
+
+**Phase 1 — done (2026-08-04, written from the Flutter-repo session).**
+- Migration `2026-08-04-100001_AddCustomerPortalEnabledToTenants` — `tenants.customer_portal_enabled`
+  TINYINT(1), default 1 (on). Added to `TenantModel::$allowedFields`.
+- `SettingsController::update` now accepts `customer_portal_enabled` (any truthy/falsy JSON shape,
+  normalized via `filter_var(..., FILTER_VALIDATE_BOOLEAN)` before the TINYINT write — didn't use an
+  `in_list[0,1]` validation rule because Flutter/web will send a JSON bool, not literal `0`/`1`).
+  `show()` needed no change — full tenant row already passes through.
+- `CustomerController::create()` → new private `provisionPortalAccount()`, called after router sync,
+  same best-effort contract (never blocks/fails the customer-creation request). Returns one of
+  `created|skipped_disabled|skipped_no_email|skipped_email_taken` and rides along in the response as
+  `portal_account` (same pattern as `router_sync`). Only wired into `create()`, deliberately **not**
+  `update()` — matches the decision that the Owner always enters the customer first, no retroactive
+  bulk-provisioning path was asked for.
+  - Random 10-char password (`generatePassword()`, excludes `0/O/1/l/I` — read off a phone screen,
+    not typed), `pelanggan` role via `RoleModel::findBySlug`, `UserModel::insert` (hashed by the
+    model's existing `beforeInsert`), then `customers.user_id` backfilled via a second
+    `CustomerRepository::update` call.
+  - Queues `NotificationModel::queue('whatsapp', 'account_created', 'customer', $id, ['email',
+    'password'], $tenantId)` — reuses the Stage 6 queue/dispatch pipeline as decided, no new sending
+    infrastructure. New template added to `NotificationTemplates::render()` /
+    `NotificationTemplates::accountCreated()`.
+  - **Security fix applied during this same phase, not originally planned**: the queued `payload`
+    carried the plaintext one-time password, and `notifications.payload` is unencrypted `TEXT` that
+    was otherwise kept forever post-send. `NotificationDispatcher::dispatchOne()` now redacts
+    `payload.password` to `'[redacted-after-send]'` at the moment `status` flips to `sent`, so the
+    plaintext only exists transiently (DB row between creation and successful delivery, plus
+    whatever WhatsApp itself retains on the recipient's end — inherent to the "send it over WA"
+    decision, not fixable from this side).
+- `AuthController::login()` — the existing tenant-status block (already fetched `$tenant` to check
+  `status === 'active'`) now also checks: `role_slug === 'pelanggan' && empty($tenant['customer_portal_enabled'])`
+  → `403` with a clear Indonesian message. Handles the case where accounts already exist and the
+  owner flips the toggle off afterward — they don't silently keep working.
+- **Verified end-to-end against the running dev server** (not just code review): logged in as
+  `owner@melati.test`, created a real customer with an email → got `portal_account: created`,
+  confirmed in MySQL directly that `customers.user_id` was backfilled, a `pelanggan`-role `users` row
+  existed, and a `notifications` row was queued with the plaintext password. Toggled
+  `customer_portal_enabled` off via `PUT /api/owner/settings` → pelanggan login correctly `403`s with
+  the new message; toggled back on → same pelanggan login correctly returns a real access/refresh
+  token pair with `role_slug: pelanggan`. Ran `php spark notifications:send` — got the same
+  already-documented "Fonnte invalid token" rejection as Stage 6/7 (melati tenant has no real Fonnte
+  credential configured, pre-existing/accepted gap, not something this phase introduced), confirming
+  the queue → dispatch → real-API-call path is reached correctly; the redaction code path itself
+  wasn't exercised by a real `sent` status in this test (needs a tenant with a working WhatsApp
+  credential to observe), but was reviewed carefully since it's a straight extension of the existing
+  proven success-path branch. Test customer/user/notification rows deleted after verification —
+  demo tenant data left exactly as it was before this phase.
+- **Not done in this phase, left for later**: no way yet to *manually* trigger/resend provisioning
+  for a customer who was created before this shipped, or one that was skipped (no email at the time,
+  say). Not asked for — flag if it comes up.
+
+**Phase 2 — done (2026-08-04, same session).** User answered the two open questions from phase 1's
+scoping: 3-day grace period ("berat ke shared hosting ga?" — no, it's one date comparison inside the
+cron that already runs daily, negligible), and yes to a real Super Admin panel.
+
+- **New tables** (separate from `invoices`/`payments` on purpose — tenant isolation is rule #1, a
+  platform invoice must never be reachable through a tenant-scoped query):
+  - `platform_settings` — single row (id=1, seeded by its own migration). `monthly_fee`,
+    `trial_days`, `grace_days`, plus the platform's own bank transfer details. Super Admin-editable
+    via `PUT /api/superadmin/settings` — **this is the "configurable pricing, no redeploy" piece
+    from phase 1's scoping note**, don't hardcode a fee anywhere else.
+  - `platform_invoices` — mirrors `invoices`' column shape deliberately, unique on
+    `(tenant_id, period_start)`.
+  - `platform_payments` — mirrors `payments`' shape. `payment_method` enum currently only allows
+    `transfer`+`gateway`, but **gateway is schema-only, not implemented** — see below.
+  - `tenants.suspended_reason` (nullable VARCHAR) — distinguishes an auto-suspension
+    (`unpaid_platform_invoice`, set by `PlatformBillingService`) from a manual one (Super Admin's
+    own `suspend` action, freeform reason) from `null` (never suspended). Nothing before this phase
+    needed to tell those apart; `AuthController::login`'s existing tenant-status block already
+    blocked ALL logins for a suspended tenant regardless of reason, so **zero changes were needed
+    there** to make billing enforcement actually lock people out — it was already generic.
+- **`PlatformBillingService`** (`app/Services/`) — the whole engine:
+  - `generateForTenant()`: skips while `trial_ends_at` is still in the future; first invoice starts
+    the day the trial ends (or today, for a tenant with no `trial_ends_at` at all — matters because
+    melati/sejahtera, the two main demo tenants, are `plan=pro` with `trial_ends_at=NULL`, i.e.
+    already-paying tenants from before this feature existed); each next invoice starts the day
+    after the previous one's `period_end`, only once that date has actually arrived. Monthly
+    periods, due 7 days after period start. Idempotent — re-running never double-generates.
+  - `enforceOverdue()`: flips `unpaid`→`overdue` past `due_date`, then suspends any tenant whose
+    oldest overdue invoice is past `due_date + grace_days`.
+  - `verifyPayment()`: same shape as `PaymentService::verify` — approve marks the invoice paid and,
+    **only if the tenant was suspended specifically for `unpaid_platform_invoice`**, reactivates it
+    automatically. A manually-suspended tenant paying their bill does NOT auto-reactivate — that
+    needs an explicit Super Admin action, on purpose (a manual suspension might be for abuse, not
+    money).
+- **`platform:billing` command** (`app/Commands/GeneratePlatformBilling.php`) — daily cron, mirrors
+  `invoices:generate`'s structure exactly. Queries tenants where `status='active' OR
+  suspended_reason='unpaid_platform_invoice'` (so a billing-suspended tenant's next invoice is still
+  ready the instant they pay and reactivate — a manually-suspended tenant gets skipped entirely,
+  correctly, since they shouldn't keep accruing bills while blocked for an unrelated reason).
+- **`superadmin:create` command** — one-off, not exposed via any API (no self-registration for this
+  role, deliberately — see Stage 13's decisions). `php spark superadmin:create --name "..." --email
+  ... --password "..."`. **A real one was created this session as a working demo/dev login**:
+  `superadmin@nethub.test` / `SuperAdmin123` — same tier as the existing `owner@melati.test` demo
+  credentials, not a production secret (nothing is deployed yet).
+- **API**: `/api/owner/platform-billing` (view own invoices + platform bank info, submit manual
+  transfer proof — proof stored under `WRITEPATH.'uploads/platform_payment_proofs/'`, **outside the
+  public webroot**, same reasoning as `Owner\PaymentController::proof`, streamed back through an
+  authenticated endpoint rather than a guessable URL) gated by `permission:settings.manage` (reused,
+  not a new slug — matches that permission already being owner-only, which is the right scope for
+  paying the platform bill). New `/api/superadmin/*` route group, filter `jwtauth:super_admin` only
+  (no `tenant` filter — `TenantFilter` already no-ops for super_admin, the group just omits it for
+  clarity): tenant list/detail/suspend/reactivate, pending-payments/verify/proof, settings.
+- **Web**: new `layouts/super_admin.php` (mirrors `layouts/customer.php`'s minimal-sidebar shell),
+  3 pages under `app/Views/superadmin/` (tenant list, tenant detail with an inline verify-payment
+  modal, settings form) + matching `Controllers/Web/SuperAdmin/*`. `auth/login.php`'s role-redirect
+  ternary extended to a 3-way branch for `super_admin` → `/superadmin/tenants`. No server-side auth
+  filter on these routes — matches this app's existing convention (`owner/*` and `customer/*` web
+  routes have none either), the client-side `nethub-auth.js` guard (redirects to `/login` if no
+  token) is the only gate, consistent everywhere.
+- **Bug caught during testing, fixed before it shipped**: `PlatformPaymentController::verify`
+  initially used a validation rule (`in_list[0,1]`) for the `approve` field — same mistake already
+  documented and fixed once in `Owner\PaymentController::verify`'s own docblock (`in_list[]`
+  compares against string literals, doesn't reliably match a real JSON boolean). Found it by
+  actually calling the endpoint with `{"approve": true}` and getting a validation error, not by
+  re-reading the other controller first — worth remembering to check for known-fixed patterns
+  *before* writing similar code, not after it breaks the same way again.
+- **Verified end-to-end against the running dev server, full real flow, not just unit-level**:
+  generated real platform invoices for melati+sejahtera via `platform:billing` (confirmed
+  `trial_ends_at IS NULL` correctly falls through to "bill starting today" rather than skipping
+  forever), confirmed idempotency on re-run, manually backdated an invoice's `due_date` to simulate
+  5 days overdue against a 3-day grace period → confirmed real auto-suspend, confirmed a real
+  `owner@melati.test` login gets the existing "tenant suspended" 403 with zero code changes needed,
+  logged in as the new real `superadmin@nethub.test`, listed tenants via the API, confirmed a
+  non-super_admin gets a real 403 on `/api/superadmin/*`, uploaded a real multipart transfer-proof
+  file as the owner, viewed it back as the proof-streaming endpoint (confirmed `image/png`
+  content-type), verified it as Super Admin → confirmed invoice flipped to `paid` AND the tenant
+  auto-reactivated in the same request, tested settings update and manual suspend/reactivate.
+  Rendered all 3 new web pages (200 OK, no leaked PHP warnings in the HTML). All test-induced state
+  (extra invoices/payments/uploaded proof file/settings values) reset back to clean afterward —
+  melati/sejahtera now each have exactly one clean real `unpaid` platform invoice (due 2026-08-11),
+  which is the actual correct end-state of this feature going live, not test pollution.
+- **Explicitly NOT built this phase, by design**: platform-level Midtrans/Xendit gateway checkout.
+  `payment_method` enum allows `gateway` at the schema level so it's not a breaking change to add
+  later, but wiring it needs (a) the user's own platform-level merchant credentials (env-based —
+  **must never** reuse `PaymentGatewayFactory::make($tenant)`, that resolves the *tenant's own*
+  merchant config, would deposit the platform fee into the *tenant's* account instead of the
+  platform operator's — see `PaymentGatewayInterface`'s own docblock), and (b) a webhook route that
+  can tell a platform-invoice payment apart from a tenant-invoice one. Manual transfer + Super Admin
+  verification is the only working payment path right now — matches the user's own confirmed
+  decision (no Google Play Billing, reuse the same rails as tenant→customer billing) but gateway
+  automation specifically wasn't part of that decision and needs a fresh ask before starting.
+- **Not decided yet, flag before building**: nothing currently reminds a tenant their platform
+  invoice is coming due or overdue (no WhatsApp/email notification wired for this, unlike
+  `invoices:remind` on the customer-billing side) — not asked for, but likely wanted once this goes
+  live for real.
+
+3. **Web — registration page + platform billing page**
+   - `GET /register` view + wiring to the already-existing `POST /api/auth/register` (that endpoint
+     has always existed, un-fronted by any web page — Android's had a Register screen since its own
+     Stage 1, web never did; this closes that asymmetry).
+   - A tenant-facing page to see/pay their own platform subscription invoice.
+
+4. **Flutter (`nethub_owner`, this repo's own progress tracked in `C:\Flutter-NEETHUB\CLAUDE.md`,
+   not duplicated here)** — role-based post-login split, new customer-role screens, platform
+   billing screen for the Owner role, portal-toggle field in the existing Settings screen.
+
+5. **Web + Android — dynamic tenant branding.** Separately confirmed gap while scoping this: neither
+   platform currently shows a logged-in tenant's own name/logo anywhere in its own chrome —
+   `layouts/dashboard.php`'s sidebar and `Views/pdf/report.php`'s title both hardcode "NetHub"
+   literally, and the Flutter app's app bar/splash hardcode "NetHub Owner"/"NetHub". Only the
+   invoice PDF (`InvoicePdfService`) already pulls real tenant name/logo dynamically. Wire the rest
+   to do the same. This is **in-app dynamic branding only** (tenant name/logo shown after login) —
+   explicitly NOT a white-labeled/per-tenant Play Store listing, which the user considered and
+   deliberately ruled out as much bigger scope than needed right now.
 
 ## Cross-cutting requirements to not lose track of
 

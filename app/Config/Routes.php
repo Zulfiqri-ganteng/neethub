@@ -22,6 +22,12 @@ $routes->group('customer', ['namespace' => 'App\Controllers\Web\Customer'], stat
     $routes->get('profile', 'ProfileController::index');
 });
 
+$routes->group('superadmin', ['namespace' => 'App\Controllers\Web\SuperAdmin'], static function ($routes) {
+    $routes->get('tenants', 'TenantController::index');
+    $routes->get('tenants/(:num)', 'TenantController::show/$1');
+    $routes->get('settings', 'SettingController::index');
+});
+
 $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (RouteCollection $routes) {
     $routes->group('auth', function ($routes) {
         $routes->post('register', 'AuthController::register', ['filter' => 'ratelimit:register,10,900']);
@@ -86,6 +92,30 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('reports/export', 'ReportController::export', ['filter' => 'permission:reports.view']);
 
         $routes->post('broadcast/whatsapp', 'BroadcastController::whatsapp', ['filter' => 'permission:broadcast.send']);
+
+        // Stage 13 — what THIS tenant owes the platform (not their own
+        // customers). Reuses settings.manage (owner-only, same as bank/QRIS
+        // config) rather than a new permission slug.
+        $routes->get('platform-billing', 'PlatformBillingController::index', ['filter' => 'permission:settings.manage']);
+        $routes->post('platform-billing/invoices/(:num)/pay', 'PlatformBillingController::pay/$1', ['filter' => 'permission:settings.manage']);
+    });
+
+    // Stage 13 — the platform operator's own surface. Cross-tenant on
+    // purpose (see TenantController's docblock) — no `tenant` filter, only
+    // `jwtauth:super_admin` (TenantFilter already no-ops for super_admin
+    // even if added, but omitting it here makes the intent obvious).
+    $routes->group('superadmin', ['namespace' => 'App\Controllers\Api\SuperAdmin', 'filter' => 'jwtauth:super_admin'], function ($routes) {
+        $routes->get('tenants', 'TenantController::index');
+        $routes->get('tenants/(:num)', 'TenantController::show/$1');
+        $routes->post('tenants/(:num)/suspend', 'TenantController::suspend/$1');
+        $routes->post('tenants/(:num)/reactivate', 'TenantController::reactivate/$1');
+
+        $routes->get('platform-payments/pending', 'PlatformPaymentController::pending');
+        $routes->get('platform-payments/(:num)/proof', 'PlatformPaymentController::proof/$1');
+        $routes->post('platform-payments/(:num)/verify', 'PlatformPaymentController::verify/$1');
+
+        $routes->get('settings', 'PlatformSettingController::show');
+        $routes->put('settings', 'PlatformSettingController::update');
     });
 
     $routes->group('customer', ['namespace' => 'App\Controllers\Api\Customer', 'filter' => ['jwtauth:pelanggan', 'tenant']], function ($routes) {

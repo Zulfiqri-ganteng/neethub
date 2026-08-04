@@ -60,7 +60,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         localStorage.setItem('nethub_refresh_token', body.data.refresh_token);
         localStorage.setItem('nethub_role', body.data.user.role_slug);
         localStorage.setItem('nethub_name', body.data.user.name);
-        window.location.href = body.data.user.role_slug === 'pelanggan' ? '/customer/dashboard' : '/dashboard';
+        const role = body.data.user.role_slug;
+        window.location.href = role === 'pelanggan' ? '/customer/dashboard' : role === 'super_admin' ? '/superadmin/tenants' : '/dashboard';
     } catch (err) {
         errBox.textContent = 'Tidak dapat menghubungi server.';
         errBox.classList.remove('d-none');

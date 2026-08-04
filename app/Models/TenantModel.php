@@ -17,7 +17,7 @@ class TenantModel extends Model
         'name', 'slug', 'logo', 'address', 'whatsapp', 'whatsapp_token', 'email',
         'qris_image', 'qris_static_code', 'bank_name', 'bank_account_number', 'bank_account_name',
         'payment_gateway', 'payment_gateway_config',
-        'plan', 'status', 'trial_ends_at',
+        'plan', 'status', 'suspended_reason', 'trial_ends_at', 'customer_portal_enabled',
     ];
 
     protected $useTimestamps = true;
