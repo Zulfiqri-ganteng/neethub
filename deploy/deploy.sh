@@ -37,14 +37,14 @@ $GIT reset --hard origin/main   >> "$LOGFILE" 2>&1
 # bukan file untracked yang bisa kehapus git clean.
 $GIT clean -fd                  >> "$LOGFILE" 2>&1
 
+echo "Fix writable permission..." >> "$LOGFILE"
+chmod -R 775 writable           >> "$LOGFILE" 2>&1
+
 echo "Run CI4 migration..." >> "$LOGFILE"
 $PHP spark migrate --all        >> "$LOGFILE" 2>&1
 
 echo "Clear cache..." >> "$LOGFILE"
 $PHP spark cache:clear          >> "$LOGFILE" 2>&1
-
-echo "Fix writable permission..." >> "$LOGFILE"
-chmod -R 775 writable           >> "$LOGFILE" 2>&1
 
 echo "Deploy finished." >> "$LOGFILE"
 echo "" >> "$LOGFILE"
