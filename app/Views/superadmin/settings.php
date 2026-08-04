@@ -75,7 +75,7 @@
             </div>
             <div class="mb-3">
                 <label class="form-label">Username SMTP</label>
-                <input type="text" class="form-control" id="smtpUser" placeholder="mis. noreply@neethub.kangmuslim.com">
+                <input type="text" class="form-control" id="smtpUser" placeholder="mis. noreply@neethub.my.id">
             </div>
             <div class="mb-3">
                 <label class="form-label">Password SMTP</label>
@@ -87,7 +87,7 @@
             </div>
             <div class="mb-3">
                 <label class="form-label">Email Pengirim</label>
-                <input type="email" class="form-control" id="smtpFromEmail" placeholder="noreply@neethub.kangmuslim.com">
+                <input type="email" class="form-control" id="smtpFromEmail" placeholder="noreply@neethub.my.id">
             </div>
             <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary">Simpan SMTP</button>
