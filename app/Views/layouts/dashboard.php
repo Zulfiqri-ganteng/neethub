@@ -41,6 +41,7 @@ $menu = [
     ['label' => 'Monitoring', 'icon' => 'ti-activity', 'href' => '/monitoring', 'enabled' => true],
     ['label' => 'Broadcast', 'icon' => 'ti-speakerphone', 'href' => '/broadcast', 'enabled' => true],
     ['label' => 'Laporan', 'icon' => 'ti-chart-bar', 'href' => '/reports', 'enabled' => true],
+    ['label' => 'Tagihan Platform', 'icon' => 'ti-credit-card-pay', 'href' => '/platform-billing', 'enabled' => true],
     ['label' => 'Pengaturan', 'icon' => 'ti-settings', 'href' => '/settings', 'enabled' => true],
 ];
 $currentPath = '/' . trim(uri_string(), '/');

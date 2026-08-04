@@ -67,8 +67,9 @@ context without depending on anything outside the project.
 10. **Optimization (caching, query tuning)** — ⬜ not started
 11. **Deployment (shared hosting)** — ⬜ not started
 12. **Multi-tenant SaaS platform (self-serve billing + customer self-service)** — 🟡 in progress
-    (Stage 13 phase 1-2/5 done: customer account auto-provisioning + portal toggle, platform
-    billing engine + Super Admin panel). See Stage 13.
+    (Stage 13 phase 1-3/5 done: customer account auto-provisioning + portal toggle, platform
+    billing engine + Super Admin panel, web register + owner platform-billing page). Remaining:
+    Android (phase 4), dynamic tenant branding (phase 5). See Stage 13.
 
 ### Stage 1 — Database Design (done)
 
@@ -1168,6 +1169,38 @@ cron that already runs daily, negligible), and yes to a real Super Admin panel.
   invoice is coming due or overdue (no WhatsApp/email notification wired for this, unlike
   `invoices:remind` on the customer-billing side) — not asked for, but likely wanted once this goes
   live for real.
+
+**Phase 3 — done (2026-08-04, same session).**
+- **`GET /register` web page** (`app/Views/auth/register.php` + `Web\RegisterController`) — closes
+  the asymmetry flagged back when Stage 13 started (Android's had a Register screen since its own
+  Stage 1, web never did; `POST /api/auth/register` existed the whole time, just had no web UI in
+  front of it). Shows the *actual* configured trial length (`platform_settings.trial_days`) rather
+  than a hardcoded number in the copy — see the bug fix below, this only became correct together.
+  `auth/login.php` got a "Daftar gratis di sini" link pointing at it.
+- **Real bug found and fixed while building this**: `AuthController::register` was still hardcoding
+  `trial_ends_at` to `+14 days`, from before `platform_settings.trial_days` (default 30) existed.
+  Nobody had gone back to wire the two together. Fixed to read `PlatformSettingModel::current()`.
+  This means **every tenant that self-registered before this fix got a 14-day trial instead of the
+  intended 30** — melati/sejahtera/testing-net (the 3 existing demo tenants) were all seeded
+  directly, not through this endpoint, so none of them were affected; flagging in case any other
+  real signups happened between Stage 2 (when register was built) and now, though none are known.
+- **Owner-facing "Tagihan Platform" page** (`app/Views/owner/platform_billing.php` +
+  `Web\PlatformBillingController`, new sidebar item in `layouts/dashboard.php`) — lists the tenant's
+  own platform invoices, "Bayar" button opens a modal with the platform's bank info
+  (`platform_settings.bank_*`) + file upload, posts multipart to
+  `POST /api/owner/platform-billing/invoices/{id}/pay`. Mirrors `customer/invoices.php`'s existing
+  transfer-payment modal pattern almost exactly (manual 401-retry-then-resend around the `fetch`
+  call, since `nethubFetch()` doesn't handle `FormData` bodies) rather than inventing a new one.
+- **Verified against the running dev server**: registered a real new tenant through the actual
+  `POST /api/auth/register` call the web form makes, confirmed `trial_ends_at` landed 30 days out
+  (not 14) — proves the settings-driven trial length fix actually took effect end-to-end, not just
+  in isolation. Confirmed a brand-new trial tenant's platform-billing view correctly shows zero
+  invoices (nothing generated yet, correct — `platform:billing` only bills after trial ends).
+  Rendered both new pages (200 OK, no leaked PHP warnings). Test tenant deleted after verification.
+- **Not done this phase**: the web pages exist and work but haven't been *manually clicked through
+  in a real browser* by anyone (Rumahweb isn't live yet regardless — `kUseProductionApi` is still
+  `false` on the Flutter side too). Same caveat as everything else in this file until real device/
+  browser testing happens.
 
 3. **Web — registration page + platform billing page**
    - `GET /register` view + wiring to the already-existing `POST /api/auth/register` (that endpoint

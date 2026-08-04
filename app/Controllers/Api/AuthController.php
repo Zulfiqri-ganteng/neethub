@@ -5,6 +5,7 @@ namespace App\Controllers\Api;
 use App\Helpers\AuthHelper;
 use App\Helpers\ValidationHelper;
 use App\Models\ActivityModel;
+use App\Models\PlatformSettingModel;
 use App\Models\RefreshTokenModel;
 use App\Models\RoleModel;
 use App\Models\TenantModel;
@@ -34,6 +35,11 @@ class AuthController extends BaseApiController
             return $this->fail('Konfigurasi role belum lengkap. Hubungi Super Admin.', 500);
         }
 
+        // Stage 13: trial length is Super Admin-configurable
+        // (platform_settings.trial_days), not a hardcoded constant — was
+        // still hardcoded to 14 here from before that feature existed.
+        $trialDays = (new PlatformSettingModel())->current()['trial_days'] ?? 30;
+
         $tenantId = $tenantModel->insert([
             'name'          => $data['tenant_name'],
             'slug'          => $this->uniqueSlug($tenantModel, $data['tenant_name']),
@@ -41,7 +47,7 @@ class AuthController extends BaseApiController
             'whatsapp'      => $data['phone'] ?? null,
             'plan'          => 'trial',
             'status'        => 'active',
-            'trial_ends_at' => date('Y-m-d H:i:s', strtotime('+14 days')),
+            'trial_ends_at' => date('Y-m-d H:i:s', strtotime("+{$trialDays} days")),
         ]);
 
         $userId = $userModel->insert([

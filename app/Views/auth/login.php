@@ -26,6 +26,10 @@
                     Masuk
                 </button>
             </form>
+
+            <p class="text-center text-muted small mt-3 mb-0">
+                Pemilik bisnis WiFi/ISP baru? <a href="/register">Daftar gratis di sini</a>
+            </p>
         </div>
     </div>
 </div>

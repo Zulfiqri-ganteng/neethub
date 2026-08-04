@@ -5,7 +5,9 @@ use CodeIgniter\Router\RouteCollection;
 /** @var RouteCollection $routes */
 $routes->get('/', static fn () => redirect()->to('/login'));
 $routes->get('login', 'Web\LoginController::index');
+$routes->get('register', 'Web\RegisterController::index');
 $routes->get('dashboard', 'Web\DashboardController::index');
+$routes->get('platform-billing', 'Web\PlatformBillingController::index');
 $routes->get('customers', 'Web\CustomerController::index');
 $routes->get('packages', 'Web\PackageController::index');
 $routes->get('invoices', 'Web\InvoiceController::index');
