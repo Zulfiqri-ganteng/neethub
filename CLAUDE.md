@@ -31,7 +31,8 @@ context without depending on anything outside the project.
   see the Stage 5 addendum for how this was caught.
 - Databases: `neethub` (main), `neethub_test` (tests). Both already created.
 - `.env` is configured: `CI_ENVIRONMENT=development`, `app.baseURL=http://localhost:8080/`,
-  encryption key set, `JWT_SECRET`/`JWT_ACCESS_EXPIRY`(900s)/`JWT_REFRESH_EXPIRY`(604800s) set.
+  encryption key set, `JWT_SECRET`/`JWT_ACCESS_EXPIRY`(900s)/`JWT_REFRESH_EXPIRY`(86400s, changed
+  from 604800s 2026-08-06 — see the addendum right after Stage 13 below) set.
 - Run migrations: `php spark migrate --all`
 - Run seeders: `php spark db:seed DatabaseSeeder`
 - Dev server: `php spark serve --port 8080`
@@ -1628,6 +1629,46 @@ name + email, never a tenant/business name — same scoping constraint as manual
   account. Worth deciding whether to document this as a real standing local-dev credential (add to
   this file's "Demo login" line) or whether the user wants a different password restored.
 - `php -l` clean on all new/edited files.
+
+### JWT refresh token lifetime shortened 7 days → 24 hours (2026-08-06, ad-hoc, from the Flutter
+### session investigating "why doesn't the app ever log out")
+
+While explaining the Flutter app's session behavior to the user (why staying logged in for hours
+never forces re-login — by design, see the `AuthInterceptor` refresh-and-retry pattern from the
+Stage 7 addendum above), the user asked directly whether the 7-day `JWT_REFRESH_EXPIRY` was too
+long from a security standpoint. Discussed the actual risk before changing anything:
+
+- Refresh tokens already **rotate** on every use (`AuthController::refresh()` calls
+  `RefreshTokenModel::revoke($stored['id'])` then issues a fresh pair) — so a stolen token dies the
+  moment EITHER the legitimate device or an attacker uses it. The real exposure window isn't "the
+  token is valid for 7 days" so much as "an attacker who steals a dormant token has up to 7 days to
+  use it before the real device does first."
+- **Checked and confirmed there is no reuse-detection** — `AuthController::refresh()` just returns
+  a plain 401 (`"Refresh token tidak valid atau sudah dicabut."`) when a stored token isn't found
+  active; it does NOT call `revokeAllForUser()` or otherwise flag the account when an
+  already-revoked/expired token is replayed. This means a classic "stolen refresh token used by an
+  attacker, tipping off the real user via a mysteriously-dead session" scenario currently goes
+  completely undetected server-side. **Not fixed this session** — flagged to the user as the
+  stronger fix (token-family reuse detection: if a revoked token is presented again, revoke the
+  entire chain, not just deny the one request) versus just shortening the TTL, which only narrows
+  the window rather than closing the gap. Worth picking up as its own piece of work later.
+- Agreed with the user on a middle ground: 24 hours, not the 1 hour they first floated — 1 hour
+  would force a full password re-login almost every time the app is reopened after being closed for
+  a while (there's no background refresh; refresh only happens reactively on the next 401), which
+  doesn't match how an intermittently-opened business app actually gets used. 24 hours still cuts
+  the worst-case exposure window from a week to a day.
+- **Changed**: `.env`'s `JWT_REFRESH_EXPIRY` 604800 → 86400. Also updated the fallback default in
+  `app/Config/JWT.php` (`getenv('JWT_REFRESH_EXPIRY') ?: 86400`, was `?: 604800`) so the shorter
+  value holds even in an environment that forgets to set the env var explicitly (e.g. this repo's
+  own `.env.example` if one gets added later, or a fresh clone before `.env` is configured).
+- **Local dev only — NOT yet applied to the live `neethub.my.id` production `.env`.** That's a
+  separate file on the Rumahweb hosting, editable only via cPanel/SSH by the user directly, same as
+  every other production `.env` change in this file's history (see Stage 13's deploy log). Flag this
+  to the user directly — until they update it there, production keeps running on the old 7-day
+  value even though local dev now uses 24 hours.
+- Not re-tested end-to-end (no code path changed, only a config number) — the existing Stage 7
+  addendum's refresh-and-retry verification already covers the mechanism itself working correctly;
+  only the expiry duration changed.
 
 ## Cross-cutting requirements to not lose track of
 
