@@ -60,4 +60,69 @@ class DashboardController extends BaseApiController
 
         return $this->ok($stats);
     }
+
+    /**
+     * Last 6 months of revenue + new-customer counts, for the Dashboard's
+     * trend charts — deliberately separate from ReportController's own
+     * revenue/customers endpoints (those are filterable/exportable detail
+     * views for the Laporan page; this is a small fixed-window summary
+     * purpose-built for the Dashboard, same "own inline aggregate queries"
+     * convention as stats() above rather than going through ReportService).
+     */
+    public function analytics()
+    {
+        $tenantId = TenantHelper::requireTenantId();
+        $cache    = Services::cache();
+        $key      = "dashboard_analytics_{$tenantId}";
+
+        if ($cached = $cache->get($key)) {
+            return $this->ok($cached);
+        }
+
+        $months = 6;
+        $from   = date('Y-m-01', strtotime('-' . ($months - 1) . ' months'));
+
+        $revenueRows = (new InvoiceModel())
+            ->select("DATE_FORMAT(paid_at, '%Y-%m') as period, SUM(total_amount) as total")
+            ->where('tenant_id', $tenantId)
+            ->where('status', 'paid')
+            ->where('paid_at >=', $from . ' 00:00:00')
+            ->groupBy('period')
+            ->findAll();
+
+        $customerRows = (new CustomerModel())
+            ->select("DATE_FORMAT(created_at, '%Y-%m') as period, COUNT(*) as total")
+            ->where('tenant_id', $tenantId)
+            ->where('created_at >=', $from . ' 00:00:00')
+            ->groupBy('period')
+            ->findAll();
+
+        $data = [
+            'revenue_trend'   => $this->fillMonths($months, array_column($revenueRows, 'total', 'period'), true),
+            'customer_growth' => $this->fillMonths($months, array_column($customerRows, 'total', 'period'), false),
+        ];
+
+        $cache->save($key, $data, 300);
+
+        return $this->ok($data);
+    }
+
+    /**
+     * Fills every month in the trailing `$months`-month window with 0 where
+     * no row exists, so the chart always renders a continuous timeline
+     * instead of skipping months with no activity.
+     *
+     * @return array<int, array{period: string, total: float|int}>
+     */
+    private function fillMonths(int $months, array $byPeriod, bool $asFloat): array
+    {
+        $result = [];
+        for ($i = $months - 1; $i >= 0; $i--) {
+            $period  = date('Y-m', strtotime("-{$i} months"));
+            $value   = $byPeriod[$period] ?? 0;
+            $result[] = ['period' => $period, 'total' => $asFloat ? (float) $value : (int) $value];
+        }
+
+        return $result;
+    }
 }

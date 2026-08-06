@@ -27,6 +27,22 @@ class ValidationHelper
         ];
     }
 
+    /**
+     * `tenant_name`/`owner_name`/`phone` are only required on the SECOND
+     * call, once AuthController::google() has already told the app the
+     * email isn't registered yet — permit_empty here since the first call
+     * (plain login attempt) only ever sends `id_token`.
+     */
+    public static function googleAuthRules(): array
+    {
+        return [
+            'id_token'    => 'required|string',
+            'tenant_name' => 'permit_empty|min_length[3]|max_length[150]',
+            'owner_name'  => 'permit_empty|min_length[2]|max_length[150]',
+            'phone'       => 'permit_empty|max_length[20]',
+        ];
+    }
+
     public static function refreshRules(): array
     {
         return [

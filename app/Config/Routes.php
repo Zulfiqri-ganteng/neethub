@@ -41,6 +41,12 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->post('forgot-password', 'AuthController::forgotPassword', ['filter' => 'ratelimit:forgot_password,5,900']);
         $routes->post('reset-password', 'AuthController::resetPassword', ['filter' => 'ratelimit:reset_password,10,900']);
 
+        // google/config is public + unrate-limited (just returns a Client
+        // ID, cheap and safe) — google itself is the actual login/register
+        // action so it gets the same rate-limit treatment as login/register.
+        $routes->get('google/config', 'AuthController::googleConfig');
+        $routes->post('google', 'AuthController::google', ['filter' => 'ratelimit:google_auth,10,900']);
+
         // Fingerprint login: register/revoke need a real logged-in session
         // (jwtauth, any role — same as logout above); challenge/login are
         // the pre-login, password-replacement pair, so they're rate-limited
@@ -59,6 +65,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
     // Kasir can view customers but can't delete them.
     $routes->group('owner', ['namespace' => 'App\Controllers\Api\Owner', 'filter' => ['jwtauth:owner,admin,teknisi,kasir', 'tenant']], function ($routes) {
         $routes->get('dashboard/stats', 'DashboardController::stats', ['filter' => 'permission:dashboard.view']);
+        $routes->get('dashboard/analytics', 'DashboardController::analytics', ['filter' => 'permission:dashboard.view']);
 
         $routes->get('customers', 'CustomerController::index', ['filter' => 'permission:customers.view']);
         $routes->post('customers', 'CustomerController::create', ['filter' => 'permission:customers.create']);
@@ -150,6 +157,11 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
 
         $routes->get('profile', 'ProfileController::show', ['filter' => 'permission:profile.manage']);
         $routes->put('profile', 'ProfileController::update', ['filter' => 'permission:profile.manage']);
+
+        $routes->get('notifications', 'NotificationController::index');
+        $routes->get('notifications/unread-count', 'NotificationController::unreadCount');
+        $routes->post('notifications/(:num)/read', 'NotificationController::markRead/$1');
+        $routes->post('notifications/read-all', 'NotificationController::markAllRead');
     });
 
     // Public — gateways can't carry our Bearer tokens. Trust is verified

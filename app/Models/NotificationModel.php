@@ -20,7 +20,7 @@ class NotificationModel extends Model
 
     protected $allowedFields = [
         'tenant_id', 'notifiable_type', 'notifiable_id', 'channel', 'type', 'payload',
-        'status', 'attempts', 'last_error', 'sent_at',
+        'status', 'attempts', 'last_error', 'sent_at', 'read_at',
     ];
 
     protected $useTimestamps = true;

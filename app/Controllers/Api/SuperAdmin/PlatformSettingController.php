@@ -35,6 +35,7 @@ class PlatformSettingController extends BaseApiController
         $update = array_intersect_key($data, array_flip([
             'monthly_fee', 'trial_days', 'grace_days', 'bank_name', 'bank_account_number', 'bank_account_name',
             'smtp_host', 'smtp_port', 'smtp_user', 'smtp_crypto', 'smtp_from_email', 'smtp_from_name',
+            'google_client_id',
         ]));
 
         // Only overwrite the stored (encrypted) password if a new one was

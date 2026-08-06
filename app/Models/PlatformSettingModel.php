@@ -21,6 +21,7 @@ class PlatformSettingModel extends Model
         'monthly_fee', 'trial_days', 'grace_days',
         'bank_name', 'bank_account_number', 'bank_account_name',
         'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_crypto', 'smtp_from_email', 'smtp_from_name',
+        'google_client_id',
     ];
 
     protected $useTimestamps = true;

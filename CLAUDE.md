@@ -1472,12 +1472,162 @@ user's explicit go-ahead — not the usual separate-session split).
   and its README documents the exact backend-verification scheme needed — no guessing required).
   Requires `MainActivity.kt` → `FlutterFragmentActivity`, `AndroidManifest.xml`
   `USE_BIOMETRIC` permission, and (specific to this plugin, a real documented Gradle-build
-  requirement) `compileSdk = 35` + `ndkVersion = "27.0.12077973"` pinned explicitly in
-  `android/app/build.gradle.kts` rather than trusting Flutter's own defaults — see that repo's
-  `CLAUDE.md` for the full Flutter-side writeup. **Not yet verified against a real Android device**
-  as of this note — the backend half was proven end-to-end above via `openssl` standing in for the
-  device's Keystore-backed signing, but the actual Flutter↔Keystore↔backend round trip on real
-  hardware is still outstanding.
+  requirement) `compileSdk = 35` + `ndkVersion` (bumped same day from `27.0.12077973` to
+  `28.2.13676358` — see the Flutter repo's `CLAUDE.md` item 27, every *other* native plugin in that
+  app wanted the higher version) pinned explicitly in `android/app/build.gradle.kts` rather than
+  trusting Flutter's own defaults — see that repo's `CLAUDE.md` for the full Flutter-side writeup.
+
+**2026-08-06, later same day — this migration actually applied to the LIVE production database,
+by the user directly** (not this session — done via the Rumahweb cPanel terminal while a parallel
+Flutter session was building/testing against it). `git pull` onto
+`~/public_html/neethub.kangmuslim.com` (fast-forward, pulled in exactly the biometric commit above:
+`CLAUDE.md`, `Routes.php`, `AuthController.php`, the migration, `ValidationHelper.php`,
+`BiometricCredentialModel.php`), then `php spark cache:clear` + `php spark migrate` — terminal
+output confirmed `Running: ... CreateBiometricCredentials ... Migrations complete.` **The
+`biometric_credentials` table now exists on production, not just local dev.** Sanity-checked from
+the Flutter session with a plain `curl https://neethub.my.id/api/auth/login` → real `422`
+(validation error, i.e. the live server responded), confirming the domain is correctly serving the
+just-migrated database. No real biometric credential has been registered against production yet —
+the Flutter session's own device-testing got interrupted before that (see that repo's `CLAUDE.md`
+item 27) — so this table exists and is reachable, but is still functionally unverified end-to-end
+against a real signed request over the public internet, only against local dev via `openssl`
+(described above) and structurally via the migration succeeding.
+
+### Notification Center (customer) — ad-hoc, 2026-08-06
+
+Not part of the original Stage 12/13 phase list — requested directly from the Flutter side
+(`C:\Flutter-NEETHUB`'s CLAUDE.md Priority 3 roadmap item "Notification Center"), backend work done
+here to unblock it. Scope deliberately limited to **pelanggan only**: the `notifications` table has
+only ever been queued with `notifiable_type = 'customer'` (payment confirmations, invoice reminders,
+broadcasts, suspend/reactivation, account_created) — **never `'user'`**, confirmed by grepping every
+`->queue(...)` call site — so Owner/Admin/Teknisi/Kasir have no data source for an in-app feed yet.
+Extending this to staff roles is a separate future ask (needs new business-logic decisions about
+which events should notify them, not just plumbing) — not started.
+
+- **Migration** `2026-08-06-120000_AddReadAtToNotifications` — added nullable `read_at DATETIME` to
+  `notifications`. Deliberately reused the existing outbound queue table as the in-app feed's data
+  source rather than building a parallel table: every call site only ever queues **one** row per
+  logical event (`channel` hardcoded per call, never one row per channel for the same event), so
+  there's no duplicate-row risk reading it directly. `read_at` is app-local and independent of
+  `status` (which tracks the WhatsApp/email/push delivery attempt for that same row) — a WhatsApp
+  send that failed still shows up and can still be marked read in-app.
+- **`NotificationRepository`** (new, extends `BaseRepository` like every other repository) —
+  `paginateForNotifiable`, `unreadCount`, `markRead` (verifies the row belongs to the calling
+  notifiable before touching it — same "ownership check inside the scoped query" discipline as
+  every other repository here), `markAllRead`.
+- **`Api\Customer\NotificationController`** (new) — `index` (paginated, each row rendered through
+  the existing `NotificationTemplates::render()` so the app gets ready-to-display `title`/`message`
+  text instead of duplicating per-type copy client-side; wrapped in a `try/catch` per row since
+  `render()` throws for an unmapped `type` — e.g. `ticket_update`, whose template was never
+  implemented since support tickets never actually queue a notification), `unreadCount`, `markRead`,
+  `markAllRead`. Routes added under the existing `customer` group (`jwtauth:pelanggan` + `tenant`
+  filters, no extra `permission:` gate — mirrors `dashboard`, which is also permission-gate-free
+  since pelanggan is a single flat role with no sub-permissions to differentiate).
+- **Verified end-to-end against real local data**, not just code review: started the dev server,
+  logged in as `owner@melati.test`, found a real portal-enabled customer (`siti.aminah@melati.test`,
+  customer #2) in the `melati-net` demo tenant, reset her password to the standard demo
+  `password123` (her original auto-generated password was never recorded anywhere, so this is now
+  effectively a third documented demo credential set alongside the staff logins — **not written into
+  the documented "Demo login" line above**, flag if that should be added), logged in as her, and hit
+  every endpoint: `GET /customer/notifications` correctly rendered 8 real pre-existing notification
+  rows (broadcasts, suspend/reactivation, and 2 rows seeded for this test) with correct
+  human-readable titles/messages; `markRead` on one row dropped the unread count 8→7; **attempting to
+  mark a different customer's notification (id belonging to customer #1) correctly returned 404**,
+  confirming the ownership check actually blocks cross-customer access, not just cross-tenant;
+  `markAllRead` correctly zeroed the remaining count. The 2 rows seeded for this test were deleted
+  afterward; the 6 pre-existing rows and the password reset were left in place (harmless demo-data
+  state, and the password reset is arguably useful — see above).
+- `php -l` clean on all new/edited files.
+
+### Dashboard Analytics (owner) — ad-hoc, 2026-08-06
+
+Also from the Flutter side's Priority 3 roadmap, same session as Notification Center above. New
+`DashboardController::analytics()` — `GET /owner/dashboard/analytics`, same `permission:dashboard.view`
+gate and 5-minute cache pattern as the existing `stats()` action, deliberately living beside it
+(inline aggregate queries directly against models) rather than going through `ReportService` — this
+is a small fixed 6-month window purpose-built for the Dashboard's trend charts, not a
+filterable/exportable report like the Laporan page's own revenue/customers endpoints.
+
+- Returns `{revenue_trend: [...], customer_growth: [...]}`, each a 6-element array of
+  `{period: 'YYYY-MM', total}` covering the trailing 6 months (current month inclusive) —
+  `revenue_trend.total` is a float (sum of paid invoices' `total_amount` for that month),
+  `customer_growth.total` is an int (count of customers whose `created_at` falls in that month).
+  A new private `fillMonths()` helper zero-fills any month with no rows, so the chart always gets a
+  continuous 6-point timeline instead of skipping empty months.
+- **Verified against real local data**: hit the endpoint as `owner@melati.test` — correctly returned
+  5 zero months + the current month showing the demo tenant's real paid-invoice total and real
+  customer count, confirming both the date-window math and the zero-fill work.
+- `php -l` clean.
+
+### Login/Register Google — ad-hoc, 2026-08-06
+
+Last of the Flutter side's Priority 3 roadmap items. Owner login/register only (Google gives us
+name + email, never a tenant/business name — same scoping constraint as manual registration).
+
+- **`google_client_id`** added to `platform_settings` (migration
+  `2026-08-06-140000_AddGoogleClientIdToPlatformSettings`) — a Google **Web application** OAuth
+  Client ID, Super Admin-editable via the existing `PUT /superadmin/settings` (same card-per-concern
+  pattern as SMTP/billing). **Not treated as a secret** — Google Client IDs are meant to be public,
+  embedded in client apps — so unlike `smtp_pass` it's never encrypted at rest and is returned as-is
+  from `GET /superadmin/settings` and the new public config endpoint below.
+- **`GET /api/auth/google/config`** (public, no auth) — `{enabled, client_id}`. Exists because
+  Login/Register are pre-auth screens with no token yet to hit the existing `jwtauth`-gated
+  `/api/brand` pattern; the Flutter app calls this first to decide whether to even show a
+  "Masuk/Daftar dengan Google" button.
+- **`POST /api/auth/google`** (`AuthController::google`, rate-limited `google_auth,10,900` same as
+  login/register) — one endpoint for both directions, decided by whether the token's verified email
+  already has an account (not a client-supplied mode flag, so the app can't be tricked into
+  re-registering an existing email):
+  - Email found → same `assertUserCanLogin` eligibility checks + `completeLogin` as password/
+    biometric login (suspended tenant, disabled account, customer-portal-off all still apply).
+  - Email not found + no `tenant_name` in the request → returns `{needs_registration: true, google:
+    {name, email}}` (200, not an error) so the app can show a short "lengkapi data usaha" form.
+  - Email not found + `tenant_name` present → `registerViaGoogle()`, same tenant+owner creation
+    shape as `register()`, just sourced from the verified Google identity instead of a submitted
+    password. The new user row still gets a real (random, `bin2hex(random_bytes(32))`, unknown-to-
+    anyone) password hash rather than null — satisfies `UserModel`'s normal validation, and "Lupa
+    Password" already works for any account regardless of how it was created if this owner ever
+    wants password login too.
+- **Token verification** (`verifyGoogleIdToken`, private): calls Google's `tokeninfo` endpoint via
+  `Services::curlrequest()` — same "direct HTTP call, no SDK" convention as
+  `FonnteWhatsAppSender`/Midtrans/Xendit in this codebase, not a JWKS-based local verification
+  (deliberately simpler; Google's own docs list `tokeninfo` as an acceptable alternative). Checks
+  `aud` against the configured `google_client_id` (so a token minted for a different Google app
+  can't be replayed here), `email_verified === 'true'`, and that `email` is present.
+- **Verified against real local data, not just code review**: hit `GET /auth/google/config` before
+  and after setting a (fake) `google_client_id` via `PUT /superadmin/settings` — `enabled` flipped
+  false→true correctly; `POST /auth/google` with a garbage `id_token` correctly failed with
+  "Login Google belum diaktifkan..." while disabled, then correctly called the **real** Google
+  `tokeninfo` API once enabled and got a real "token tidak valid" rejection (not a crash) — same
+  tier of evidence as Fonnte/Midtrans/Xendit's own "reached the real API, got a real rejection"
+  verification. The test `google_client_id` was reset back to `null` afterward (nothing is actually
+  configured yet — see the Flutter-side note below for what's still needed).
+- **OAuth consent screen pushed to Production, same day, later** — the user did this live with
+  Claude guiding them through the Google Cloud Console UI (project "Neethub" created, consent
+  screen configured, Web + Android OAuth clients created — see the Flutter-side `CLAUDE.md` item 32
+  for the full walkthrough and the actual Client ID values). Confirmed via the "Push to production?"
+  dialog that no Google verification review was required (only triggered by >10 domains, a
+  configured logo, or sensitive/restricted scopes — none apply here, this app only ever requests
+  the basic `email`/`profile` scopes Sign-In needs) — Audience page now shows **"In production"**.
+  **Practical effect**: any real Google account can now complete Login/Daftar dengan Google in the
+  Android app **immediately**, independent of whether `nethub_owner` has been published to the Play
+  Store yet (those are two unrelated gates — Play Store controls app *distribution*, the OAuth
+  consent screen's publishing status controls *who Google allows through the sign-in flow*, and
+  before this change it was silently limited to explicitly-added test users only).
+- **⚠️ Web frontend has NO Google Sign-In integration** — checked directly (`grep -il google` across
+  `app/Views/auth/login.php`, `register.php`, `public/js/nethub-auth.js`): zero matches. Only the
+  backend API (`GET /auth/google/config`, `POST /auth/google`) and the Flutter/Android app got built
+  this session — the web login/register pages still only offer email+password. The backend endpoint
+  itself is role/platform-agnostic and could be wired into the web pages too without any backend
+  changes, but nobody has done that UI work yet. Flag as a real, not-yet-started gap if "Google
+  login" is ever assumed to already cover the web surface.
+- **⚠️ Incidental**: while logging in as Super Admin to test the settings save, discovered
+  `superadmin@nethub.test` (the user's own real local Super Admin account, not a demo seed row) had
+  a password this session didn't know — reset it to the standard `password123` demo password to
+  proceed. **Local dev DB only**, not production, but flagging since it wasn't a seeded/throwaway
+  account. Worth deciding whether to document this as a real standing local-dev credential (add to
+  this file's "Demo login" line) or whether the user wants a different password restored.
+- `php -l` clean on all new/edited files.
 
 ## Cross-cutting requirements to not lose track of
 

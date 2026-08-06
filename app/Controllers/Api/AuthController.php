@@ -15,6 +15,8 @@ use App\Models\UserModel;
 use App\Notifications\NotificationSenderFactory;
 use App\Services\NotificationTemplates;
 use CodeIgniter\HTTP\ResponseInterface;
+use Config\Services;
+use RuntimeException;
 
 class AuthController extends BaseApiController
 {
@@ -84,6 +86,189 @@ class AuthController extends BaseApiController
             'user'   => $user,
             ...$tokens,
         ], 'Registrasi berhasil. Selamat datang di NetHub!');
+    }
+
+    /**
+     * Public, unauthenticated — the app calls this BEFORE showing the
+     * "Masuk/Daftar dengan Google" button, since Login/Register are
+     * pre-auth screens with no way to hit the jwtauth-gated `/brand`
+     * endpoint's pattern. `client_id` is a Google Web Client ID, not a
+     * secret — safe to return as-is (same reasoning `google_client_id`
+     * itself is never encrypted at rest in platform_settings).
+     */
+    public function googleConfig()
+    {
+        $clientId = (new PlatformSettingModel())->current()['google_client_id'] ?? null;
+
+        return $this->ok([
+            'enabled'   => ! empty($clientId),
+            'client_id' => $clientId,
+        ]);
+    }
+
+    /**
+     * One endpoint for both "Masuk dengan Google" and "Daftar dengan
+     * Google" — which one happens is decided by whether the token's email
+     * already has an account, not by a client-supplied mode flag (so the
+     * app can't be tricked into re-registering an existing email, and a
+     * user who forgot they already signed up just gets logged in instead
+     * of a confusing "email already exists" error).
+     *
+     * Google only ever gives us name + email, never a business name or
+     * phone — so a genuinely new email can't be registered in one call.
+     * The first call (just `id_token`) gets back `needs_registration: true`
+     * plus Google's own name/email so the app can show a short "lengkapi
+     * data usaha" form, then resubmit the SAME id_token with `tenant_name`
+     * (+ optional `owner_name`/`phone`) filled in. Google ID tokens are
+     * short-lived (~1 hour) but that's easily enough time for this
+     * two-step round trip.
+     */
+    public function google()
+    {
+        if (! $this->validate(ValidationHelper::googleAuthRules())) {
+            return $this->validationError($this->validator->getErrors());
+        }
+
+        $data     = $this->request->getJSON(true) ?? $this->request->getPost();
+        $clientId = (new PlatformSettingModel())->current()['google_client_id'] ?? null;
+
+        if (empty($clientId)) {
+            return $this->fail('Login Google belum diaktifkan oleh penyedia layanan.', 422);
+        }
+
+        try {
+            $payload = $this->verifyGoogleIdToken($data['id_token'], $clientId);
+        } catch (RuntimeException $e) {
+            return $this->unauthorized($e->getMessage());
+        }
+
+        $email     = $payload['email'];
+        $userModel = new UserModel();
+        $user      = $userModel->findByEmailWithRole($email);
+
+        if ($user) {
+            $eligibilityError = $this->assertUserCanLogin($user);
+            if ($eligibilityError) {
+                return $eligibilityError;
+            }
+
+            return $this->completeLogin($user, 'Login berhasil.', 'Login berhasil (Google)');
+        }
+
+        if (empty($data['tenant_name'])) {
+            return $this->ok([
+                'needs_registration' => true,
+                'google'             => ['name' => $payload['name'] ?? '', 'email' => $email],
+            ], 'Akun belum terdaftar. Lengkapi data usaha untuk mendaftar.');
+        }
+
+        return $this->registerViaGoogle($email, $payload['name'] ?? '', $data);
+    }
+
+    /**
+     * Same shape as register() — a brand-new tenant + owner — just sourced
+     * from a verified Google identity instead of a submitted password. The
+     * account still gets a real (random, unknown-to-anyone) password hash
+     * rather than a null/blank one, so it satisfies UserModel's normal
+     * `password required` validation and stays consistent with "every user
+     * row has a password" — if this owner ever wants password login too,
+     * "Lupa Password" already works for any account regardless of how it
+     * was created.
+     */
+    private function registerViaGoogle(string $email, string $googleName, array $data): ResponseInterface
+    {
+        $tenantModel = new TenantModel();
+        $userModel   = new UserModel();
+        $roleModel   = new RoleModel();
+
+        $ownerRole = $roleModel->findBySlug('owner');
+        if (! $ownerRole) {
+            return $this->fail('Konfigurasi role belum lengkap. Hubungi Super Admin.', 500);
+        }
+
+        $trialDays = (new PlatformSettingModel())->current()['trial_days'] ?? 30;
+
+        $tenantId = $tenantModel->insert([
+            'name'          => $data['tenant_name'],
+            'slug'          => $this->uniqueSlug($tenantModel, $data['tenant_name']),
+            'email'         => $email,
+            'whatsapp'      => $data['phone'] ?? null,
+            'plan'          => 'trial',
+            'status'        => 'active',
+            'trial_ends_at' => date('Y-m-d H:i:s', strtotime("+{$trialDays} days")),
+        ]);
+
+        $userId = $userModel->insert([
+            'tenant_id' => $tenantId,
+            'role_id'   => $ownerRole['id'],
+            'name'      => $data['owner_name'] ?? ($googleName !== '' ? $googleName : 'Owner'),
+            'email'     => $email,
+            'phone'     => $data['phone'] ?? null,
+            'password'  => bin2hex(random_bytes(32)),
+            'is_active' => 1,
+        ]);
+
+        (new ActivityModel())->log(
+            'register',
+            $tenantId,
+            $userId,
+            "Tenant baru terdaftar via Google: {$data['tenant_name']}",
+            $this->request->getIPAddress(),
+            $this->request->getUserAgent()->getAgentString()
+        );
+
+        $tokens = $this->issueTokens((int) $userId, $tenantId ? (int) $tenantId : null, 'owner', $email);
+
+        $user = $userModel->findWithRole((int) $userId);
+        unset($user['password']);
+
+        return $this->created([
+            'tenant' => $tenantModel->find($tenantId),
+            'user'   => $user,
+            ...$tokens,
+        ], 'Registrasi berhasil. Selamat datang di NetHub!');
+    }
+
+    /**
+     * Verifies the ID token against Google's tokeninfo endpoint — a simple
+     * HTTP call rather than local JWKS-based verification, same "direct
+     * HTTP call, no SDK" convention as FonnteWhatsAppSender/Midtrans/Xendit
+     * in this codebase, and Google's own docs list this endpoint as an
+     * acceptable (if slightly slower) alternative to local verification.
+     * Checks `aud` against this platform's configured Client ID so a token
+     * meant for a completely different Google app can't be replayed here.
+     *
+     * @return array<string, mixed> the token's decoded claims (sub, email,
+     *   email_verified, name, ...)
+     * @throws RuntimeException with a user-facing message on any failure.
+     */
+    private function verifyGoogleIdToken(string $idToken, string $expectedClientId): array
+    {
+        $client   = Services::curlrequest();
+        $response = $client->get('https://oauth2.googleapis.com/tokeninfo', [
+            'query'       => ['id_token' => $idToken],
+            'http_errors' => false,
+        ]);
+
+        if ($response->getStatusCode() !== 200) {
+            throw new RuntimeException('Token Google tidak valid atau sudah kedaluwarsa.');
+        }
+
+        $payload = json_decode($response->getBody(), true) ?? [];
+
+        if (($payload['aud'] ?? null) !== $expectedClientId) {
+            throw new RuntimeException('Token Google tidak valid untuk aplikasi ini.');
+        }
+
+        if (($payload['email_verified'] ?? 'false') !== 'true') {
+            throw new RuntimeException('Email Google Anda belum terverifikasi.');
+        }
+
+        if (empty($payload['email'])) {
+            throw new RuntimeException('Google tidak mengirimkan alamat email.');
+        }
+
+        return $payload;
     }
 
     public function login()
