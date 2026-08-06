@@ -1670,6 +1670,79 @@ long from a security standpoint. Discussed the actual risk before changing anyth
   addendum's refresh-and-retry verification already covers the mechanism itself working correctly;
   only the expiry duration changed.
 
+### Tiered platform pricing by customer count — backend done (2026-08-06, same session)
+
+The gap flagged in the Flutter repo's `CLAUDE.md` item 35 ("customer-count-tiered platform
+pricing... not started on either side") — the user picked this as the next thing to build. Backend
+half done this session; Super Admin UI (web + Android) is a deliberately separate, paused sub-phase
+per the user's own "one piece at a time, this touches money" instinct (same discipline as Stage 13).
+Design decisions confirmed with the user first: tier is resolved off a tenant's **total** customer
+count (all statuses — a suspended/pending customer still counts, reflects business scale not just
+current billable customers), re-resolved **automatically on every new invoice generation** (already-
+issued invoices are never rewritten), and trial tenants stay free regardless of customer count
+(unchanged behavior — tiers only affect what a tenant pays once trial ends).
+
+- **New table `platform_pricing_tiers`** (migration `2026-08-06-150000_CreatePlatformPricingTiers`)
+  — `min_customers`/`max_customers` (nullable = "and above", the top/unbounded tier)/`monthly_fee`.
+  Seeded with 5 starting tiers (the user explicitly delegated the actual numbers — "atur aja bos,
+  biar ga kemahalan juga ga kemurahan"): 0–25→Rp50rb, 26–75→Rp100rb, 76–200→Rp200rb,
+  201–500→Rp350rb, 501+→Rp600rb. Fully Super Admin-editable once the UI ships (see below) — these
+  are just a sensible starting point, not a permanent decision.
+- **`PlatformPricingTierModel`** — `resolveFee(int $customerCount): ?float` (null = no tier
+  matches, caller must fall back to the flat rate), `overlaps(min, max, ?excludeId)` (interval-
+  overlap check, used before every insert/update so two tiers can never cover an ambiguous range —
+  a *gap* between tiers is allowed, since `resolveFee`'s null return has a safe fallback; an
+  *overlap* is blocked outright since there'd be no deterministic way to pick a winner).
+- **`PlatformBillingService::generateForTenant()`** — now counts the tenant's customers
+  (`CustomerModel::where('tenant_id', ...)->countAllResults()` — soft-deleted customers already
+  excluded by the model's own `useSoftDeletes`, matching the "all statuses but not actually
+  deleted" decision) and resolves the invoice amount via
+  `$pricingTiers->resolveFee($count) ?? $settings['monthly_fee']` — the flat
+  `platform_settings.monthly_fee` is now purely a fallback for an empty tier table or an
+  unconfigured gap, not the primary price source anymore.
+- **New Super Admin CRUD API** (`PricingTierController`, routes under the existing
+  `superadmin` group): `GET/POST /superadmin/pricing-tiers`,
+  `PUT/DELETE /superadmin/pricing-tiers/{id}`. No `ActivityModel` logging — matches
+  `PlatformSettingController`'s own convention of not logging platform-level config changes (no
+  tenant_id to attribute it to).
+- **Verified against the real local dev server, not just unit-level**: ran the migration for real
+  (confirmed 5 rows), logged in as the real Super Admin, hit every endpoint over HTTP — listed
+  tiers, tried to create a genuinely overlapping range (rejected 422, correct), tried to create a
+  range already covered by the unbounded top tier (also correctly rejected — proves the unbounded-
+  tier overlap check works, not just bounded-vs-bounded), shrunk a real tier to open up a gap,
+  created a new tier filling exactly that gap (accepted — proves gaps aren't false-flagged as
+  overlaps), deleted it, and reverted the shrunk tier back to its original bound — table is back to
+  the clean 5-tier starting state. Separately cross-checked `resolveFee`'s query logic with a raw
+  SQL equivalent across 11 sample customer counts spanning every tier boundary (0, 10, 25, 26, 75,
+  76, 200, 201, 500, 501, 5000) — every boundary resolves to the correct fee with zero gaps.
+  `php -l` clean on all new/edited files.
+- **Web UI — done (2026-08-06, next session, "gas web").** New
+  `Controllers\Web\SuperAdmin\PricingTierController::index()` (just renders the view — same
+  pattern as `SettingController`, all data loaded client-side) + `GET /superadmin/pricing-tiers`
+  web route. New `app/Views/superadmin/pricing_tiers.php` — table + Bootstrap modal add/edit form,
+  mirrors `owner/packages.php`'s existing table+modal CRUD pattern almost exactly (same
+  `loadX()`/`openCreateModal()`/`openEditModal()`/delete-with-`confirm()` shape), hitting the same
+  `/api/superadmin/pricing-tiers` endpoints already proven correct via `curl` above. No dedicated
+  "get one tier" endpoint exists, so `openEditModal` re-fetches the full (short) list and finds the
+  row client-side rather than adding a new backend endpoint for it. Entry point: a new card in
+  `superadmin/settings.php` (right after the flat-fee Biaya card, same placement as the Android
+  side's `_PricingTiersLinkSection`) linking to the new page — deliberately **not** added as a 4th
+  sidebar nav item, matching the Android app's own choice to keep it a pushed sub-screen rather
+  than a fixed nav destination.
+  **Verified for real**: `php -l` clean, started the local dev server, confirmed both
+  `/superadmin/pricing-tiers` and `/superadmin/settings` return real `200`s (not `500`s — would
+  have caught a fatal view/controller error), grepped the actual rendered HTML for the page's key
+  elements (title, table body, modal, the new Settings-page link) to confirm the view compiled
+  correctly end-to-end, not just that *a* page rendered.
+  **Both Android and web sides of this feature are now done.** Only remaining gap:
+  the migration hasn't been run on production yet (see below).
+- **Not yet done**: the `platform_pricing_tiers` migration + this whole feature is still
+  **local-dev only** — production (`neethub.my.id`) hasn't had `git pull` + `php spark migrate` run
+  against it yet, same outstanding step as the refresh-token change earlier this session. Until
+  that happens, production billing still resolves every tenant's platform invoice off the old flat
+  `platform_settings.monthly_fee` — harmless (that's the same fallback this feature always uses for
+  an empty tier table), just means the tiered pricing isn't live yet.
+
 ## Cross-cutting requirements to not lose track of
 
 `docs/SPEC.md` has a Testing Strategy, Deployment Strategy, Performance Targets, Migration/Data

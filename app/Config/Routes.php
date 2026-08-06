@@ -30,6 +30,7 @@ $routes->group('superadmin', ['namespace' => 'App\Controllers\Web\SuperAdmin'], 
     $routes->get('tenants', 'TenantController::index');
     $routes->get('tenants/(:num)', 'TenantController::show/$1');
     $routes->get('settings', 'SettingController::index');
+    $routes->get('pricing-tiers', 'PricingTierController::index');
 });
 
 $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (RouteCollection $routes) {
@@ -142,6 +143,11 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('settings', 'PlatformSettingController::show');
         $routes->put('settings', 'PlatformSettingController::update');
         $routes->post('settings/test-smtp', 'PlatformSettingController::testSmtp');
+
+        $routes->get('pricing-tiers', 'PricingTierController::index');
+        $routes->post('pricing-tiers', 'PricingTierController::create');
+        $routes->put('pricing-tiers/(:num)', 'PricingTierController::update/$1');
+        $routes->delete('pricing-tiers/(:num)', 'PricingTierController::delete/$1');
     });
 
     $routes->group('customer', ['namespace' => 'App\Controllers\Api\Customer', 'filter' => ['jwtauth:pelanggan', 'tenant']], function ($routes) {

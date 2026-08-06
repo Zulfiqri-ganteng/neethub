@@ -47,6 +47,19 @@
     </div>
 </div>
 
+<div class="card mb-3" style="max-width: 560px;">
+    <div class="card-body p-4">
+        <h5 class="mb-1">Tier Harga Berdasarkan Jumlah Pelanggan</h5>
+        <p class="text-muted small mb-3">
+            Atur biaya langganan platform bertingkat sesuai jumlah pelanggan tenant — biaya di atas
+            hanya dipakai sebagai cadangan kalau tidak ada tier yang cocok.
+        </p>
+        <a href="/superadmin/pricing-tiers" class="btn btn-outline-primary">
+            <i class="ti ti-stack-2"></i> Kelola Tier Harga
+        </a>
+    </div>
+</div>
+
 <div class="card" style="max-width: 560px;">
     <div class="card-body p-4">
         <h5 class="mb-1">Pengiriman Email (SMTP)</h5>

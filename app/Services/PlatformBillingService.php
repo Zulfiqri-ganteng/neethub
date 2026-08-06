@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\ActivityModel;
+use App\Models\CustomerModel;
 use App\Models\PlatformInvoiceModel;
 use App\Models\PlatformPaymentModel;
+use App\Models\PlatformPricingTierModel;
 use App\Models\PlatformSettingModel;
 use App\Models\TenantModel;
 use RuntimeException;
@@ -21,7 +23,9 @@ class PlatformBillingService
         private PlatformInvoiceModel $invoices = new PlatformInvoiceModel(),
         private PlatformPaymentModel $payments = new PlatformPaymentModel(),
         private PlatformSettingModel $settings = new PlatformSettingModel(),
-        private TenantModel $tenants = new TenantModel()
+        private TenantModel $tenants = new TenantModel(),
+        private PlatformPricingTierModel $pricingTiers = new PlatformPricingTierModel(),
+        private CustomerModel $customers = new CustomerModel()
     ) {
     }
 
@@ -66,11 +70,20 @@ class PlatformBillingService
         $periodEnd = date('Y-m-d', strtotime($nextStart . ' +1 month -1 day'));
         $dueDate   = date('Y-m-d', strtotime($nextStart . ' +7 days'));
 
+        // Tiered pricing by total customer count (all statuses — a
+        // suspended/pending customer still counts, per the user's own
+        // decision), Super Admin-configurable. Falls back to the flat
+        // platform_settings.monthly_fee if no tier matches (empty tier
+        // table, or a gap between two tiers) so a misconfigured tier list
+        // can never break billing outright.
+        $customerCount = $this->customers->where('tenant_id', $tenant['id'])->countAllResults();
+        $amount        = $this->pricingTiers->resolveFee($customerCount) ?? $settings['monthly_fee'];
+
         $invoiceId = $this->invoices->insert([
             'tenant_id'    => $tenant['id'],
             'period_start' => $nextStart,
             'period_end'   => $periodEnd,
-            'amount'       => $settings['monthly_fee'],
+            'amount'       => $amount,
             'status'       => 'unpaid',
             'due_date'     => $dueDate,
         ]);
