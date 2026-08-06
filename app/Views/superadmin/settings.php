@@ -104,6 +104,23 @@
     </div>
 </div>
 
+<div class="card mt-3" style="max-width: 560px;">
+    <div class="card-body p-4">
+        <h5 class="mb-1">Login Google</h5>
+        <p class="text-muted small mb-3">
+            Client ID dari Google Cloud Console (jenis "Web application"). Kosongkan untuk
+            menonaktifkan tombol "Masuk/Daftar dengan Google" di seluruh aplikasi (web &amp; Android).
+        </p>
+        <form id="googleForm">
+            <div class="mb-3">
+                <label class="form-label">Google Client ID</label>
+                <input type="text" class="form-control" id="googleClientId" placeholder="xxxxx.apps.googleusercontent.com">
+            </div>
+            <button type="submit" class="btn btn-primary">Simpan Login Google</button>
+        </form>
+    </div>
+</div>
+
 <?= $this->endSection() ?>
 
 <?= $this->section('scripts') ?>
@@ -135,6 +152,8 @@ async function loadSettings() {
     document.getElementById('smtpConfiguredBadge').innerHTML = body.data.smtp_configured
         ? '<span class="badge bg-success-subtle text-success">Sudah diatur</span>'
         : '<span class="badge bg-secondary-subtle text-secondary">Belum diatur</span>';
+
+    document.getElementById('googleClientId').value = body.data.google_client_id || '';
 }
 
 document.getElementById('settingsForm').addEventListener('submit', async (e) => {
@@ -180,6 +199,20 @@ document.getElementById('smtpForm').addEventListener('submit', async (e) => {
     showMessage(body.success ? 'success' : 'error', body.message);
     document.getElementById('smtpPass').value = '';
     if (body.success) loadSettings();
+});
+
+document.getElementById('googleForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const body = await nethubFetch('/api/superadmin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            google_client_id: document.getElementById('googleClientId').value,
+        }),
+    });
+
+    showMessage(body.success ? 'success' : 'error', body.message);
 });
 
 async function testSmtp() {
