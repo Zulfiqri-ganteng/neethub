@@ -5,6 +5,7 @@ namespace App\Controllers\Api;
 use App\Helpers\AuthHelper;
 use App\Helpers\ValidationHelper;
 use App\Models\ActivityModel;
+use App\Models\BiometricCredentialModel;
 use App\Models\PasswordResetModel;
 use App\Models\PlatformSettingModel;
 use App\Models\RefreshTokenModel;
@@ -13,6 +14,7 @@ use App\Models\TenantModel;
 use App\Models\UserModel;
 use App\Notifications\NotificationSenderFactory;
 use App\Services\NotificationTemplates;
+use CodeIgniter\HTTP\ResponseInterface;
 
 class AuthController extends BaseApiController
 {
@@ -98,6 +100,24 @@ class AuthController extends BaseApiController
             return $this->unauthorized('Email atau password salah.');
         }
 
+        $eligibilityError = $this->assertUserCanLogin($user);
+        if ($eligibilityError) {
+            return $eligibilityError;
+        }
+
+        return $this->completeLogin($user, 'Login berhasil');
+    }
+
+    /**
+     * Same account-status checks `login()` and `biometricLogin()` must both
+     * enforce (an inactive account, a suspended tenant, or a tenant that
+     * turned the customer portal off shouldn't get in through *either*
+     * door) — kept in one place so they can't silently drift apart.
+     *
+     * @return ResponseInterface|null null if the user is allowed to log in.
+     */
+    private function assertUserCanLogin(array $user): ?ResponseInterface
+    {
         if ((int) $user['is_active'] === 0) {
             return $this->forbidden('Akun Anda dinonaktifkan. Hubungi administrator.');
         }
@@ -116,13 +136,23 @@ class AuthController extends BaseApiController
             }
         }
 
+        return null;
+    }
+
+    /**
+     * Shared tail end of every successful login (password or biometric):
+     * bump `last_login_at`, log the activity, issue a fresh token pair.
+     */
+    private function completeLogin(array $user, string $message, string $activityNote = 'Login berhasil'): ResponseInterface
+    {
+        $userModel = new UserModel();
         $userModel->update($user['id'], ['last_login_at' => date('Y-m-d H:i:s')]);
 
         (new ActivityModel())->log(
             'login',
             $user['tenant_id'] !== null ? (int) $user['tenant_id'] : null,
             (int) $user['id'],
-            'Login berhasil',
+            $activityNote,
             $this->request->getIPAddress(),
             $this->request->getUserAgent()->getAgentString()
         );
@@ -139,7 +169,7 @@ class AuthController extends BaseApiController
         return $this->ok([
             'user' => $user,
             ...$tokens,
-        ], 'Login berhasil.');
+        ], $message);
     }
 
     public function refresh()
@@ -291,6 +321,131 @@ class AuthController extends BaseApiController
         );
 
         return $this->ok(null, 'Password berhasil direset. Silakan masuk dengan password baru Anda.');
+    }
+
+    /**
+     * Register (or re-register) this device's biometric-gated public key
+     * against the currently logged-in user. Requires a normal Bearer token
+     * from a real password login — you can't turn fingerprint login on
+     * without having just proven you know the password, by design.
+     */
+    public function biometricRegister()
+    {
+        if (! $this->validate(ValidationHelper::biometricRegisterRules())) {
+            return $this->validationError($this->validator->getErrors());
+        }
+
+        $data = $this->request->getJSON(true) ?? $this->request->getPost();
+
+        (new BiometricCredentialModel())->upsertForUser(
+            AuthHelper::id(),
+            $data['device_id'],
+            $data['device_name'] ?? null,
+            $data['public_key']
+        );
+
+        return $this->ok(null, 'Login sidik jari berhasil diaktifkan.');
+    }
+
+    /**
+     * Step 1 of passwordless biometric login (no auth — this is what lets
+     * the app get back in without a password at all): issue a one-time
+     * challenge for this device to sign with its private key. Deliberately
+     * doesn't reveal *why* a device isn't eligible (never registered vs.
+     * revoked vs. wrong device) — same anti-enumeration reasoning as
+     * `forgotPassword()`.
+     */
+    public function biometricChallenge()
+    {
+        if (! $this->validate(ValidationHelper::biometricChallengeRules())) {
+            return $this->validationError($this->validator->getErrors());
+        }
+
+        $data       = $this->request->getJSON(true) ?? $this->request->getPost();
+        $credModel  = new BiometricCredentialModel();
+        $credential = $credModel->findActiveByDeviceId($data['device_id']);
+
+        if (! $credential) {
+            return $this->unauthorized('Login sidik jari tidak tersedia untuk perangkat ini. Silakan masuk dengan password.');
+        }
+
+        $challenge = bin2hex(random_bytes(32));
+        $credModel->setChallenge((int) $credential['id'], $challenge, 120);
+
+        return $this->ok(['challenge' => $challenge], 'Tantangan berhasil dibuat.');
+    }
+
+    /**
+     * Step 2: verify the signed challenge against the stored public key.
+     * On success this behaves exactly like a normal login — same account
+     * eligibility checks, same fresh token pair — it just replaces "type
+     * your password" with "prove you hold the private key" as the factor.
+     */
+    public function biometricLogin()
+    {
+        if (! $this->validate(ValidationHelper::biometricLoginRules())) {
+            return $this->validationError($this->validator->getErrors());
+        }
+
+        $data       = $this->request->getJSON(true) ?? $this->request->getPost();
+        $credModel  = new BiometricCredentialModel();
+        $credential = $credModel->findActiveByDeviceId($data['device_id']);
+
+        if (! $credential) {
+            return $this->unauthorized('Login sidik jari tidak tersedia untuk perangkat ini. Silakan masuk dengan password.');
+        }
+
+        if (empty($credential['challenge']) || strtotime($credential['challenge_expires_at']) < time()) {
+            return $this->unauthorized('Tantangan sudah kedaluwarsa. Coba lagi.');
+        }
+
+        $publicKey = openssl_pkey_get_public($credential['public_key']);
+        $signature = base64_decode($data['signature'], true);
+        $verified  = $publicKey && $signature !== false
+            && openssl_verify($credential['challenge'], $signature, $publicKey, OPENSSL_ALGO_SHA256) === 1;
+
+        // Single-use regardless of outcome — a failed attempt shouldn't
+        // leave a challenge sitting around for a retry to reuse.
+        $credModel->clearChallenge((int) $credential['id']);
+
+        if (! $verified) {
+            return $this->unauthorized('Verifikasi sidik jari gagal.');
+        }
+
+        $userModel = new UserModel();
+        $user      = $userModel->findWithRole((int) $credential['user_id']);
+
+        if (! $user) {
+            return $this->unauthorized('Akun tidak ditemukan.');
+        }
+
+        $eligibilityError = $this->assertUserCanLogin($user);
+        if ($eligibilityError) {
+            return $eligibilityError;
+        }
+
+        $credModel->markUsed((int) $credential['id']);
+
+        return $this->completeLogin($user, 'Login berhasil.', 'Login berhasil (sidik jari)');
+    }
+
+    /**
+     * Turns fingerprint login back off for this device — called when the
+     * user explicitly disables it from the app. Deliberately independent of
+     * a normal `logout()`/refresh-token lifecycle: the whole point of this
+     * credential is that it survives a regular logout and gets a *fresh*
+     * token pair on its own, so logging out must NOT implicitly revoke it.
+     */
+    public function biometricRevoke()
+    {
+        if (! $this->validate(ValidationHelper::biometricRevokeRules())) {
+            return $this->validationError($this->validator->getErrors());
+        }
+
+        $data = $this->request->getJSON(true) ?? $this->request->getPost();
+        (new BiometricCredentialModel())->revokeForUser(AuthHelper::id(), $data['device_id']);
+
+        return $this->ok(null, 'Login sidik jari berhasil dinonaktifkan.');
     }
 
     private function issueTokens(int $userId, ?int $tenantId, string $roleSlug, string $email): array

@@ -49,4 +49,35 @@ class ValidationHelper
             'password' => 'required|min_length[8]',
         ];
     }
+
+    public static function biometricRegisterRules(): array
+    {
+        return [
+            'device_id'   => 'required|string|max_length[100]',
+            'device_name' => 'permit_empty|string|max_length[150]',
+            'public_key'  => 'required|string',
+        ];
+    }
+
+    public static function biometricChallengeRules(): array
+    {
+        return [
+            'device_id' => 'required|string|max_length[100]',
+        ];
+    }
+
+    public static function biometricLoginRules(): array
+    {
+        return [
+            'device_id' => 'required|string|max_length[100]',
+            'signature' => 'required|string',
+        ];
+    }
+
+    public static function biometricRevokeRules(): array
+    {
+        return [
+            'device_id' => 'required|string|max_length[100]',
+        ];
+    }
 }

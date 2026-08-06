@@ -1417,6 +1417,68 @@ the Android app doesn't point here yet, this was purely the user testing the web
 Whatever `super_admin` credentials exist on that server as of "now" should be treated as live/current
 rather than assumed from any earlier note in this file — check with the user rather than assuming.
 
+**2026-08-06 — Biometric ("Login Sidik Jari") endpoints added, driven from the Flutter session.**
+Not part of the original Stage 13 plan — the Flutter session (`C:\Flutter-NEETHUB\CLAUDE.md`) was
+building a fingerprint-login feature for `nethub_owner`, started with a simpler local-only design
+(fingerprint just re-unlocked an already-stored token, no backend involved), then the user
+explicitly asked to upgrade it to a real server-registered credential — the same pattern
+banking apps use, verified cryptographically rather than trusted locally. Analyzed and built from
+this backend session directly (both repos touched from Flutter's session in this instance, per the
+user's explicit go-ahead — not the usual separate-session split).
+
+- **New table `biometric_credentials`** (migration
+  `2026-08-06-090001_CreateBiometricCredentials.php`) — one row per (user, device): `user_id`,
+  `device_id` (globally unique — the pre-login challenge/login endpoints don't know who the user is
+  yet, so `device_id` alone is the lookup key; in practice one app install only ever holds one
+  logged-in account, so this is safe), `device_name`, `public_key` (PEM), `challenge` +
+  `challenge_expires_at` (the pending login challenge, held inline rather than a separate table
+  since this table is already 1 row per device), `last_used_at`, `revoked_at` (soft-revoke, same
+  pattern as `refresh_tokens`).
+- **4 new `AuthController` endpoints**, all under `/api/auth/biometric/*`:
+  - `POST register` (`jwtauth`, any role) — upserts this device's public key against
+    `AuthHelper::id()`. Requires a real Bearer token, i.e. a password login must have *just*
+    happened — you cannot turn this on without proving you know the password first.
+  - `POST challenge` (rate-limited, **no auth** — this is the whole point) — issues a random
+    32-byte hex challenge for a `device_id`, 120s TTL, single-use.
+  - `POST login` (rate-limited, no auth) — verifies `openssl_verify($challenge, $signature,
+    $publicKey, OPENSSL_ALGO_SHA256)` (RSA + SHA-256 + PKCS1v15 — matches the Flutter
+    `biometric_signature` package's documented default exactly, confirmed against its own README's
+    reference Node/Python/Go verification snippets before writing this). On success, behaves
+    exactly like a normal login: same `assertUserCanLogin()` eligibility checks (extracted from
+    `login()` into a shared private method so both paths can't silently drift apart — inactive
+    account / suspended tenant / customer-portal-disabled-for-pelanggan all still apply), same
+    `issueTokens()`, same response shape. **Not** dependent on any previously-issued refresh token
+    still being valid — it's a fully independent fresh login, so it survives a normal logout by
+    design (the Flutter side's whole reason for wanting the upgrade).
+  - `POST revoke` (`jwtauth`, any role) — soft-revokes the credential for the caller's own
+    `device_id`. Deliberately **not** wired into `logout()` — revoking on every logout would defeat
+    the point (logout must NOT kill the fingerprint credential, see above).
+- **`ValidationHelper`** gained `biometricRegisterRules()`/`biometricChallengeRules()`/
+  `biometricLoginRules()`/`biometricRevokeRules()`, same pattern as every other auth rule set.
+- **Routes**: `register`/`revoke` behind plain `jwtauth` (any role, same treatment as `logout`);
+  `challenge`/`login` behind `ratelimit:biometric_challenge,20,900` /
+  `ratelimit:biometric_login,10,900` (same rate-limit-instead-of-auth treatment as `login`/`refresh`
+  themselves, since these two are the explicit password-replacement pair).
+- **Verified end-to-end against the real local DB**, not just code review: ran `php spark migrate`,
+  started a real dev server, logged in as `owner@melati.test`, generated a real RSA-2048 keypair via
+  `openssl genrsa`/`openssl rsa -pubout`, called `register` with the real PEM public key, called
+  `challenge`, signed the returned challenge with `openssl dgst -sha256 -sign`, called `login` →
+  got back real fresh access/refresh tokens. Also confirmed the negative paths: re-submitting an
+  already-consumed challenge correctly fails ("Tantangan sudah kedaluwarsa"), and `challenge` on a
+  revoked device correctly fails ("Login sidik jari tidak tersedia..."). Test credential row deleted
+  from the DB afterward.
+- **Flutter side**: added `biometric_signature` package (chosen specifically because it does
+  hardware-backed RSA-2048 signing with the private key never leaving Android Keystore/StrongBox,
+  and its README documents the exact backend-verification scheme needed — no guessing required).
+  Requires `MainActivity.kt` → `FlutterFragmentActivity`, `AndroidManifest.xml`
+  `USE_BIOMETRIC` permission, and (specific to this plugin, a real documented Gradle-build
+  requirement) `compileSdk = 35` + `ndkVersion = "27.0.12077973"` pinned explicitly in
+  `android/app/build.gradle.kts` rather than trusting Flutter's own defaults — see that repo's
+  `CLAUDE.md` for the full Flutter-side writeup. **Not yet verified against a real Android device**
+  as of this note — the backend half was proven end-to-end above via `openssl` standing in for the
+  device's Keystore-backed signing, but the actual Flutter↔Keystore↔backend round trip on real
+  hardware is still outstanding.
+
 ## Cross-cutting requirements to not lose track of
 
 `docs/SPEC.md` has a Testing Strategy, Deployment Strategy, Performance Targets, Migration/Data

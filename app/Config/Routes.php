@@ -40,6 +40,15 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->post('logout', 'AuthController::logout', ['filter' => 'jwtauth']);
         $routes->post('forgot-password', 'AuthController::forgotPassword', ['filter' => 'ratelimit:forgot_password,5,900']);
         $routes->post('reset-password', 'AuthController::resetPassword', ['filter' => 'ratelimit:reset_password,10,900']);
+
+        // Fingerprint login: register/revoke need a real logged-in session
+        // (jwtauth, any role — same as logout above); challenge/login are
+        // the pre-login, password-replacement pair, so they're rate-limited
+        // instead, same treatment as login itself.
+        $routes->post('biometric/register', 'AuthController::biometricRegister', ['filter' => 'jwtauth']);
+        $routes->post('biometric/revoke', 'AuthController::biometricRevoke', ['filter' => 'jwtauth']);
+        $routes->post('biometric/challenge', 'AuthController::biometricChallenge', ['filter' => 'ratelimit:biometric_challenge,20,900']);
+        $routes->post('biometric/login', 'AuthController::biometricLogin', ['filter' => 'ratelimit:biometric_login,10,900']);
     });
 
     // Stage 13 phase 5 — cross-role branding lookup, any authenticated role.
