@@ -19,10 +19,11 @@ class PlatformSettingController extends BaseApiController
     public function update()
     {
         $rules = [
-            'monthly_fee' => 'permit_empty|decimal|greater_than[0]',
-            'trial_days'  => 'permit_empty|integer|greater_than[0]',
-            'grace_days'  => 'permit_empty|integer|greater_than_equal_to[0]',
-            'smtp_port'   => 'permit_empty|integer',
+            'monthly_fee'      => 'permit_empty|decimal|greater_than[0]',
+            'trial_days'       => 'permit_empty|integer|greater_than[0]',
+            'grace_days'       => 'permit_empty|integer|greater_than_equal_to[0]',
+            'smtp_port'        => 'permit_empty|integer',
+            'mobile_min_build' => 'permit_empty|integer|greater_than[0]',
         ];
 
         if (! $this->validate($rules)) {
@@ -32,10 +33,14 @@ class PlatformSettingController extends BaseApiController
         $data  = $this->request->getJSON(true) ?? $this->request->getRawInput();
         $model = new PlatformSettingModel();
 
+        // mobile_apk_* deliberately excluded here — those are only ever set
+        // by AppController::registerApk (read straight from the uploaded
+        // APK's own manifest), never hand-typed through this generic form.
         $update = array_intersect_key($data, array_flip([
             'monthly_fee', 'trial_days', 'grace_days', 'bank_name', 'bank_account_number', 'bank_account_name',
             'smtp_host', 'smtp_port', 'smtp_user', 'smtp_crypto', 'smtp_from_email', 'smtp_from_name',
             'google_client_id',
+            'mobile_min_build', 'mobile_maintenance', 'mobile_maintenance_msg',
         ]));
 
         // Only overwrite the stored (encrypted) password if a new one was

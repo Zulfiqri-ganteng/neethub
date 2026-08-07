@@ -61,6 +61,16 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
     // Stage 13 phase 5 — cross-role branding lookup, any authenticated role.
     $routes->get('brand', 'BrandController::index', ['filter' => 'jwtauth']);
 
+    // Android update-checker. Both public — version is read before any
+    // login exists; registerApk authenticates itself via an X-Apk-Token
+    // header (constant-time compare against .env), not a user session, since
+    // it's called by a build/deploy script rather than the app itself.
+    $routes->group('app', function ($routes) {
+        $routes->get('version', 'AppController::version');
+        $routes->post('apk/register', 'AppController::registerApk');
+        $routes->post('apk/publish', 'AppController::publishApk');
+    });
+
     // Owner + Admin + Teknisi + Kasir share the /api/owner/* surface; each
     // endpoint narrows further with a 'permission:<slug>' filter so e.g. a
     // Kasir can view customers but can't delete them.

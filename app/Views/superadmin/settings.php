@@ -134,6 +134,32 @@
     </div>
 </div>
 
+<div class="card mt-3" style="max-width: 560px;">
+    <div class="card-body p-4">
+        <h5 class="mb-1">Aplikasi Android</h5>
+        <p class="text-muted small mb-1" id="mobileApkInfo">Belum ada APK terdaftar.</p>
+        <p class="text-muted small mb-3">
+            Versi/build APK diisi otomatis saat rilis (bukan diketik manual di sini). Hanya batas
+            minimal wajib-update dan mode pemeliharaan yang diatur dari sini.
+        </p>
+        <form id="mobileAppForm">
+            <div class="mb-3">
+                <label class="form-label">Wajib Update Minimal Build</label>
+                <input type="number" class="form-control" id="mobileMinBuild" min="1">
+            </div>
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" id="mobileMaintenance">
+                <label class="form-check-label" for="mobileMaintenance">Mode Pemeliharaan (blokir sementara akses aplikasi Android)</label>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Pesan Pemeliharaan</label>
+                <textarea class="form-control" id="mobileMaintenanceMsg" rows="2"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Simpan Aplikasi Android</button>
+        </form>
+    </div>
+</div>
+
 <?= $this->endSection() ?>
 
 <?= $this->section('scripts') ?>
@@ -167,6 +193,13 @@ async function loadSettings() {
         : '<span class="badge bg-secondary-subtle text-secondary">Belum diatur</span>';
 
     document.getElementById('googleClientId').value = body.data.google_client_id || '';
+
+    document.getElementById('mobileMinBuild').value = body.data.mobile_min_build || 1;
+    document.getElementById('mobileMaintenance').checked = !!body.data.mobile_maintenance;
+    document.getElementById('mobileMaintenanceMsg').value = body.data.mobile_maintenance_msg || '';
+    document.getElementById('mobileApkInfo').textContent = body.data.mobile_apk_build
+        ? `Rilis terpasang saat ini: v${body.data.mobile_apk_version || '-'} (build ${body.data.mobile_apk_build})${body.data.mobile_apk_notes ? ' — ' + body.data.mobile_apk_notes : ''}`
+        : 'Belum ada APK terdaftar — upload lewat FTP lalu daftarkan lewat endpoint apk/register.';
 }
 
 document.getElementById('settingsForm').addEventListener('submit', async (e) => {
@@ -222,6 +255,22 @@ document.getElementById('googleForm').addEventListener('submit', async (e) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             google_client_id: document.getElementById('googleClientId').value,
+        }),
+    });
+
+    showMessage(body.success ? 'success' : 'error', body.message);
+});
+
+document.getElementById('mobileAppForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const body = await nethubFetch('/api/superadmin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            mobile_min_build: document.getElementById('mobileMinBuild').value,
+            mobile_maintenance: document.getElementById('mobileMaintenance').checked,
+            mobile_maintenance_msg: document.getElementById('mobileMaintenanceMsg').value,
         }),
     });
 

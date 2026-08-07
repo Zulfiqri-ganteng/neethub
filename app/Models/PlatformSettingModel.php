@@ -22,6 +22,9 @@ class PlatformSettingModel extends Model
         'bank_name', 'bank_account_number', 'bank_account_name',
         'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_crypto', 'smtp_from_email', 'smtp_from_name',
         'google_client_id',
+        'mobile_apk_file', 'mobile_apk_version', 'mobile_apk_build', 'mobile_apk_size',
+        'mobile_apk_notes', 'mobile_apk_uploaded_at', 'mobile_min_build',
+        'mobile_maintenance', 'mobile_maintenance_msg',
     ];
 
     protected $useTimestamps = true;
