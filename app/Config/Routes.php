@@ -75,6 +75,8 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->delete('customers/(:num)', 'CustomerController::delete/$1', ['filter' => 'permission:customers.delete']);
         $routes->post('customers/(:num)/suspend', 'CustomerController::suspend/$1', ['filter' => 'permission:customers.suspend']);
         $routes->post('customers/(:num)/enable', 'CustomerController::enable/$1', ['filter' => 'permission:customers.suspend']);
+        $routes->get('customers/import-template', 'CustomerController::importTemplate', ['filter' => 'permission:customers.create']);
+        $routes->post('customers/import', 'CustomerController::import', ['filter' => 'permission:customers.create']);
 
         $routes->get('packages', 'PackageController::index', ['filter' => 'permission:packages.view']);
         $routes->post('packages', 'PackageController::create', ['filter' => 'permission:packages.create']);

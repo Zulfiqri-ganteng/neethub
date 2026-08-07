@@ -55,12 +55,20 @@
                         <label class="form-label">Tipe</label>
                         <select id="rtType" class="form-select" required>
                             <option value="mikrotik">MikroTik</option>
-                            <option value="ubiquiti">Ubiquiti</option>
-                            <option value="omada">Omada</option>
-                            <option value="openwrt">OpenWRT</option>
-                            <option value="huawei">Huawei</option>
-                            <option value="cisco">Cisco</option>
-                            <option value="ruijie">Ruijie</option>
+                            <option value="ubiquiti" disabled>Ubiquiti (Segera)</option>
+                            <option value="omada" disabled>Omada (Segera)</option>
+                            <option value="openwrt" disabled>OpenWRT (Segera)</option>
+                            <option value="huawei" disabled>Huawei (Segera)</option>
+                            <option value="cisco" disabled>Cisco (Segera)</option>
+                            <option value="ruijie" disabled>Ruijie (Segera)</option>
+                        </select>
+                        <small class="text-muted">Hanya MikroTik yang didukung penuh saat ini — brand lain akan menyusul.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Mode Koneksi API</label>
+                        <select id="rtApiScheme" class="form-select">
+                            <option value="api">API (port 8728, plain)</option>
+                            <option value="api-ssl">API-SSL (port 8729, terenkripsi — direkomendasikan jika router diakses via internet)</option>
                         </select>
                     </div>
                     <div class="row">
@@ -163,9 +171,21 @@ async function testConnection(id) {
     }
 }
 
+// Port 8728/8729 are the two well-known MikroTik API ports — auto-swap the
+// port field when the scheme changes, but only while it still holds one of
+// those two defaults, so a deliberately customized port (e.g. a forwarded
+// non-standard port) is never silently overwritten.
+document.getElementById('rtApiScheme').addEventListener('change', (e) => {
+    const portField = document.getElementById('rtPort');
+    const current = Number(portField.value);
+    if (current !== 8728 && current !== 8729) return;
+    portField.value = e.target.value === 'api-ssl' ? 8729 : 8728;
+});
+
 function openCreateModal() {
     document.getElementById('routerForm').reset();
     document.getElementById('routerId').value = '';
+    document.getElementById('rtApiScheme').value = 'api';
     document.getElementById('rtPort').value = 8728;
     document.getElementById('rtPassword').required = true;
     document.getElementById('rtPasswordHint').classList.add('d-none');
@@ -179,6 +199,7 @@ async function openEditModal(id) {
     document.getElementById('routerId').value = r.id;
     document.getElementById('rtName').value = r.name;
     document.getElementById('rtType').value = r.type;
+    document.getElementById('rtApiScheme').value = r.api_scheme || 'api';
     document.getElementById('rtIp').value = r.ip_address;
     document.getElementById('rtPort').value = r.port;
     document.getElementById('rtUsername').value = r.username;
@@ -196,6 +217,7 @@ document.getElementById('routerForm').addEventListener('submit', async (e) => {
     const payload = {
         name: document.getElementById('rtName').value,
         type: document.getElementById('rtType').value,
+        api_scheme: document.getElementById('rtApiScheme').value,
         ip_address: document.getElementById('rtIp').value,
         port: Number(document.getElementById('rtPort').value),
         username: document.getElementById('rtUsername').value,

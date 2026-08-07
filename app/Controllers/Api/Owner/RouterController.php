@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\Owner;
 
 use App\Controllers\Api\BaseApiController;
+use App\Drivers\RouterDriverFactory;
 use App\Repositories\RouterRepository;
 use App\Services\RouterService;
 use RuntimeException;
@@ -50,6 +51,7 @@ class RouterController extends BaseApiController
             'port'       => 'permit_empty|integer',
             'username'   => 'required|max_length[100]',
             'password'   => 'required|max_length[100]',
+            'api_scheme' => 'permit_empty|in_list[api,api-ssl,ssh]',
         ];
 
         if (! $this->validate($rules)) {
@@ -57,6 +59,21 @@ class RouterController extends BaseApiController
         }
 
         $data = $this->request->getJSON(true) ?? $this->request->getPost();
+
+        // The `type` enum still lists every brand we eventually want to
+        // support (schema/driver contract are ready for them — see
+        // RouterDriverFactory), but only `implementedTypes()` actually work
+        // today. Rejecting the rest here, with a clear message, beats
+        // letting an owner configure a router that silently fails on every
+        // real operation (test connection, auto-provisioning, suspend on
+        // nonpayment, monitoring) — those all resolve the driver deep
+        // inside RouterService, far from where the owner would see why.
+        if (! in_array($data['type'] ?? null, RouterDriverFactory::implementedTypes(), true)) {
+            return $this->validationError([
+                'type' => "Tipe router '{$data['type']}' belum didukung sepenuhnya saat ini — gunakan MikroTik untuk saat ini. Brand lain akan menyusul.",
+            ]);
+        }
+
         $data = array_intersect_key($data, array_flip([
             'name', 'type', 'ip_address', 'port', 'username', 'password', 'api_scheme', 'location', 'notes',
         ]));
@@ -72,6 +89,7 @@ class RouterController extends BaseApiController
             'name'       => 'permit_empty|min_length[2]|max_length[100]',
             'ip_address' => 'permit_empty|max_length[45]',
             'port'       => 'permit_empty|integer',
+            'api_scheme' => 'permit_empty|in_list[api,api-ssl,ssh]',
         ];
 
         if (! $this->validate($rules)) {

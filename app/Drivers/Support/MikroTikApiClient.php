@@ -21,6 +21,14 @@ use RuntimeException;
  * has NOT been exercised against a real or virtual MikroTik device in this
  * environment (no hardware available here) — test against a real router
  * (or a MikroTik CHR VM) before relying on it in production.
+ *
+ * Supports both the plain (`api`, port 8728) and TLS (`api-ssl`, port 8729)
+ * transports — same binary word protocol either way, just wrapped in a TLS
+ * stream for the latter. RouterOS's api-ssl service uses a self-signed
+ * certificate out of the box unless the admin has installed a real one, so
+ * peer verification is deliberately off here (matches how other published
+ * RouterOS API clients handle this) — this is about encrypting the
+ * credentials/commands in transit, not about verifying router identity.
  */
 class MikroTikApiClient
 {
@@ -30,13 +38,33 @@ class MikroTikApiClient
     public function __construct(
         private string $host,
         private int $port = 8728,
-        private int $timeoutSeconds = 5
+        private int $timeoutSeconds = 5,
+        private bool $useTls = false
     ) {
     }
 
     public function connect(): void
     {
-        $socket = @fsockopen($this->host, $this->port, $errno, $errstr, $this->timeoutSeconds);
+        if ($this->useTls) {
+            $context = stream_context_create([
+                'ssl' => [
+                    'verify_peer'       => false,
+                    'verify_peer_name'  => false,
+                    'allow_self_signed' => true,
+                ],
+            ]);
+
+            $socket = @stream_socket_client(
+                "ssl://{$this->host}:{$this->port}",
+                $errno,
+                $errstr,
+                $this->timeoutSeconds,
+                STREAM_CLIENT_CONNECT,
+                $context
+            );
+        } else {
+            $socket = @fsockopen($this->host, $this->port, $errno, $errstr, $this->timeoutSeconds);
+        }
 
         if ($socket === false) {
             throw new RuntimeException("Tidak dapat terhubung ke router {$this->host}:{$this->port} ({$errstr}).");

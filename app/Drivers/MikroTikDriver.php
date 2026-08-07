@@ -22,7 +22,8 @@ class MikroTikDriver implements RouterDriverInterface
         private string $host,
         private int $port,
         private string $username,
-        private string $password
+        private string $password,
+        private string $apiScheme = 'api'
     ) {
     }
 
@@ -136,7 +137,7 @@ class MikroTikDriver implements RouterDriverInterface
     private function connected(): MikroTikApiClient
     {
         if ($this->client === null) {
-            $client = new MikroTikApiClient($this->host, $this->port);
+            $client = new MikroTikApiClient($this->host, $this->port, useTls: $this->apiScheme === 'api-ssl');
             $client->connect();
 
             if (! $client->login($this->username, $this->password)) {
