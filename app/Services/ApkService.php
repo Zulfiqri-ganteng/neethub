@@ -236,10 +236,7 @@ class ApkService
 
         $path = $dir . $filename;
         if (! is_file($path)) {
-            // TEMP DIAGNOSTIC (2026-08-07): reveals the real resolved path so
-            // we can see what FCPATH actually is on this host — remove once
-            // the projectneethub/apk/ path mismatch investigation is done.
-            return ['ok' => false, 'code' => 'apk_not_found', 'message' => "File {$filename} tidak ditemukan. Dicek di: {$path} | FCPATH: " . FCPATH . ' | is_dir: ' . (is_dir($dir) ? 'yes' : 'no') . ' | glob: ' . implode(',', glob($dir . '*') ?: ['(empty or unreadable)'])];
+            return ['ok' => false, 'code' => 'apk_not_found', 'message' => "File {$filename} tidak ditemukan di projectneethub/apk/."];
         }
         if (! self::validateApk($path)) {
             return ['ok' => false, 'code' => 'invalid_apk', 'message' => 'File bukan APK valid (perlu signature ZIP + AndroidManifest.xml).'];
