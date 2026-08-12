@@ -30,6 +30,15 @@
                 </button>
             </form>
 
+            <div id="googleAuthBlock" class="d-none">
+                <div class="d-flex align-items-center my-3">
+                    <hr class="flex-grow-1">
+                    <span class="text-muted small px-2">atau</span>
+                    <hr class="flex-grow-1">
+                </div>
+                <div id="googleSignInButton" class="d-flex justify-content-center"></div>
+            </div>
+
             <p class="text-center text-muted small mt-3 mb-0">
                 Pemilik bisnis WiFi/ISP baru? <a href="/register">Daftar gratis di sini</a>
             </p>
@@ -38,6 +47,65 @@
 </div>
 
 <script>
+async function initGoogleSignIn() {
+    try {
+        const res = await fetch('/api/auth/google/config');
+        const body = await res.json();
+        const cfg = body.data;
+        if (!cfg || !cfg.enabled || typeof google === 'undefined') return;
+
+        google.accounts.id.initialize({
+            client_id: cfg.client_id,
+            callback: handleGoogleCredential,
+        });
+        document.getElementById('googleAuthBlock').classList.remove('d-none');
+        google.accounts.id.renderButton(document.getElementById('googleSignInButton'), {
+            type: 'standard', theme: 'outline', size: 'large', shape: 'pill',
+            text: 'signin_with', logo_alignment: 'center', width: 340,
+        });
+    } catch (err) { /* Google login is an optional convenience — never block the normal form. */ }
+}
+// The GSI library loads with `async`, so its own timing isn't guaranteed
+// relative to this inline script — wait for the window `load` event (fires
+// only once every subresource, including the async GSI script, has
+// finished) instead of racing a same-tick `typeof google` check.
+window.addEventListener('load', initGoogleSignIn);
+
+async function handleGoogleCredential(response) {
+    const errBox = document.getElementById('loginError');
+    errBox.classList.add('d-none');
+
+    try {
+        const res = await fetch('/api/auth/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_token: response.credential }),
+        });
+        const body = await res.json();
+
+        if (!body.success) {
+            errBox.textContent = body.message || 'Login dengan Google gagal.';
+            errBox.classList.remove('d-none');
+            return;
+        }
+
+        if (body.data.needs_registration) {
+            window.location.href = '/register?google=1';
+            return;
+        }
+
+        localStorage.setItem('nethub_access_token', body.data.access_token);
+        localStorage.setItem('nethub_refresh_token', body.data.refresh_token);
+        localStorage.setItem('nethub_role', body.data.user.role_slug);
+        localStorage.setItem('nethub_name', body.data.user.name);
+        const role = body.data.user.role_slug;
+        window.location.href = role === 'pelanggan' ? '/customer/dashboard' : role === 'super_admin' ? '/superadmin/tenants' : '/dashboard';
+    } catch (err) {
+        errBox.textContent = 'Tidak dapat menghubungi server.';
+        errBox.classList.remove('d-none');
+    }
+}
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const errBox = document.getElementById('loginError');

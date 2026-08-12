@@ -1914,6 +1914,57 @@ but nothing ever produced a row with it — vestigial.
   already proven correct end-to-end earlier in this same session, so what's unverified here is purely
   the DOM/JS wiring, not the business logic.
 
+### Login/Register dengan Google — web half, done (2026-08-12, same day, later session)
+
+Item 32 in Flutter `CLAUDE.md` built "Login/Daftar dengan Google" for the Android app back on
+2026-08-06 — the backend (`POST /auth/google`, `GET /auth/google/config`) was always platform-
+agnostic, but the **web frontend** (`app/Views/auth/login.php` / `register.php`) never got a
+matching button. The user noticed this gap directly ("di web layar login via google belum ada ya")
+and asked for it, "wajib profesional" (must be professional-quality).
+
+- **Library**: Google Identity Services (`https://accounts.google.com/gsi/client`), Google's current
+  official JS SDK — added to `app/Views/layouts/auth.php`'s `<head>` with a plain `async` attribute
+  (not `async defer` together — per the HTML spec `async` alone already wins over `defer` when both
+  are present, so the second attribute was dead weight, cleaned up rather than left copy-pasted).
+  Uses Google's own `renderButton()` widget (pill shape, outline theme, centered logo) rather than a
+  custom-styled button — avoids any Google brand-guideline risk and looks native/trustworthy for
+  free, which is what "profesional" concretely means for a sign-in button.
+- **Real race-condition bug caught and fixed before it ever shipped**: the first draft called
+  `google.accounts.id.initialize(...)` from an inline script that ran at parse time, immediately
+  after the GSI `<script async>` tag — but an `async` script's execution time relative to other
+  inline scripts is **not guaranteed**, so on a slow network the inline code could run before
+  `window.google` was even defined, silently skipping the whole button (a `typeof google ===
+  'undefined'` guard just made the failure quiet instead of loud — worse, since it'd be an
+  intermittent "sometimes the button just doesn't show up" bug, exactly the kind of thing that's easy
+  to miss in casual testing and only bites real users on a slow connection). Fixed by moving the
+  init call into a named `initGoogleSignIn()` function invoked via
+  `window.addEventListener('load', initGoogleSignIn)` — `load` only fires after every subresource
+  (including the async GSI script) has finished, which deterministically rules out the race. Caught
+  by re-reasoning through script-loading semantics, not by observing a real intermittent failure —
+  worth a real multi-run browser test to confirm, per this project's own standing "reasoning isn't
+  proof, verify on the real thing" lesson (see Flutter `CLAUDE.md` items 27/34/36 for the same lesson
+  learned the hard way on layout bugs).
+- **One endpoint, three UI outcomes** (mirrors the backend's own single-endpoint design from item
+  32, and the Android app's exact two-tap UX): `POST /api/auth/google` with just `{id_token}` either
+  (a) logs an existing account straight in, or (b) returns `needs_registration: true` +
+  `{name, email}` from Google. On **login.php**, outcome (b) redirects to `/register?google=1` (a
+  small info banner there explains why, then the user clicks the Google button again — Google's own
+  account picker will very likely auto-suggest the same account, so this is low-friction despite
+  being two taps). On **register.php**, outcome (b) swaps the manual form for a compact
+  `googleDetailsForm` (Nama Bisnis WiFi/ISP + Nama Anda, pre-filled from Google's name + No.
+  WhatsApp optional — exactly what Google *can't* already provide, same reasoning as the Android
+  form) which resubmits the **same** `id_token` plus `tenant_name`/`owner_name`/`phone` to finish
+  registration. A third outcome only register.php needs to handle: the email already has an account
+  (user clicked "Daftar dengan Google" but really meant to log in) — treated as a normal successful
+  login with no separate error, matching Android's "Akun sudah terdaftar" auto-redirect behavior.
+- Verified via `php -l` (all 3 touched files clean) and a Node `--check` syntax pass on both pages'
+  extracted `<script>` blocks (clean) + a live `curl` re-confirmation that
+  `GET /api/auth/google/config` on production still returns the expected `{enabled, client_id}`
+  shape this exact JS expects. **Not click-tested in a real browser** — same standing limitation as
+  the manual-payment web work above (session-cookie auth isn't curl-able), and doubly true here since
+  actually completing a Google OAuth popup flow needs a real Google account interacting with a real
+  browser, which no amount of `curl` can substitute for.
+
 ## Cross-cutting requirements to not lose track of
 
 `docs/SPEC.md` has a Testing Strategy, Deployment Strategy, Performance Targets, Migration/Data
