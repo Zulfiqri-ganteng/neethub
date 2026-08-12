@@ -2002,6 +2002,45 @@ SQL via phpMyAdmin. User asked for a real button instead.
   every other web/Android UI change today; the underlying endpoint itself was proven correct via
   real HTTP calls, what's unverified is purely the UI wiring.
 
+### Super Admin: delete a tenant — done (2026-08-12, same day, right after the trial-date feature)
+
+Same session, user asked directly for a "hapus owner" (delete tenant) button — the previously
+`TenantController` had `index`/`show`/`suspend`/`reactivate`/`extendTrial` but no way to actually
+remove a tenant.
+
+- **Soft-delete, not a real `DELETE FROM`** — `TenantModel::$useSoftDeletes` was already `true`
+  (confirmed by reading the model before writing any code), so `TenantController::destroy($id)` just
+  calls `$tenantModel->delete($id)`, which stamps `deleted_at` rather than destroying the row. New
+  route `DELETE tenants/(:num)`, same `jwtauth:super_admin` group as every other tenant action.
+  Deliberately did **not** implement a real hard delete — the user asked for a plain "delete button"
+  without specifying hard-vs-soft, and soft is the responsible default for a destructive action with
+  no undo UI (a misclick doesn't lose real business data).
+- **Confirmed the practical effect is real, not just cosmetic**: `AuthController::
+  assertUserCanLogin()` looks the tenant up via `TenantModel::find($user['tenant_id'])` — since every
+  `Model` call transparently excludes soft-deleted rows when `useSoftDeletes` is on, a deleted
+  tenant's `find()` returns null, and login is blocked for every one of their staff/customers
+  immediately (reusing the exact same "Akun tenant Anda sedang di-suspend" message the real suspend
+  action already shows — a minor label inaccuracy for the deleted case specifically, left as-is since
+  it doesn't leak anything sensitive and matches existing behavior).
+- **Verified end-to-end against the real local dev server**: inserted a real throwaway tenant row via
+  direct SQL, deleted it via the new endpoint → `200`, confirmed a subsequent `GET` on the same ID →
+  `404` (properly hidden), confirmed calling `DELETE` again on the already-deleted ID → also `404`
+  (idempotent, not a crash), confirmed the row still physically exists in the table with `deleted_at`
+  populated (real soft-delete, not a hard delete) before hard-cleaning up the throwaway row via SQL
+  afterward (it was pure test data with no real relationships, safe to fully remove).
+- **Android**: new `SuperAdminRepository.deleteTenant()`, a small red "Hapus Tenant Ini" text button
+  at the bottom of `SuperAdminTenantDetailScreen` (below Suspend/Aktifkan — deliberately less visually
+  prominent than those, matching the severity gap between "reversible operational action" and "rare,
+  more severe action"), behind the existing `ConfirmDialog` (`isDangerous: true`, same convention as
+  every other delete in this app — e.g. Package delete). Pops back to the tenant list and refreshes
+  it on success. `flutter analyze`: 0 issues.
+- **Web**: red "Hapus" button next to Suspend/Reactivate on `tenant_detail.php`, a plain
+  `confirm()` (matching this file's existing simple-confirm style, not a full modal — consistent with
+  `suspendTenant()`'s own `prompt()` above it), redirects to `/superadmin/tenants` on success.
+  `php -l` + Node `--check` clean.
+- Not click-tested in a real browser/device — same standing caveat as every other UI-only change
+  today.
+
 ## Cross-cutting requirements to not lose track of
 
 `docs/SPEC.md` has a Testing Strategy, Deployment Strategy, Performance Targets, Migration/Data

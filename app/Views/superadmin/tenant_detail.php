@@ -15,6 +15,9 @@
                 <button class="btn btn-outline-success btn-sm d-none" id="reactivateBtn" onclick="reactivateTenant()">
                     <i class="ti ti-lock-open"></i> Aktifkan Kembali
                 </button>
+                <button class="btn btn-danger btn-sm" onclick="deleteTenant()">
+                    <i class="ti ti-trash"></i> Hapus
+                </button>
             </div>
         </div>
     </div>
@@ -216,6 +219,16 @@ async function reactivateTenant() {
     const body = await nethubFetch(`/api/superadmin/tenants/${tenantId}/reactivate`, { method: 'POST' });
     showMessage(body.success ? 'success' : 'error', body.message);
     if (body.success) loadTenant();
+}
+
+async function deleteTenant() {
+    const name = document.getElementById('tenantName').textContent;
+    if (!confirm(`Hapus tenant "${name}"? Seluruh stafnya tidak akan bisa login lagi. Data pelanggan/tagihan/pembayaran mereka tetap tersimpan (tidak ikut terhapus).`)) return;
+
+    const body = await nethubFetch(`/api/superadmin/tenants/${tenantId}`, { method: 'DELETE' });
+    if (!body.success) { showMessage('error', body.message); return; }
+
+    window.location.href = '/superadmin/tenants';
 }
 
 function openTrialModal(currentDate) {
