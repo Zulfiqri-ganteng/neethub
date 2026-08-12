@@ -62,6 +62,9 @@
                 <div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>
             </div>
             <div class="modal-footer">
+                <button type="button" class="btn btn-primary d-none" id="detailManualPayBtn" onclick="showManualPaymentModal()">
+                    <i class="ti ti-cash"></i> Catat Pembayaran Manual
+                </button>
                 <button type="button" class="btn btn-outline-primary d-none" id="detailQrisBtn" onclick="showOwnerQris()">
                     <i class="ti ti-qrcode"></i> Tampilkan QR/Rekening
                 </button>
@@ -83,6 +86,39 @@
             </div>
             <div class="modal-body" id="qrisBody">
                 <div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Payment Modal -->
+<div class="modal fade" id="manualPaymentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Catat Pembayaran Manual</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    Untuk pembayaran tunai/transfer yang diterima langsung dari pelanggan (dicatat di
+                    buku/kuitansi), tanpa lewat portal pelanggan. Tagihan akan langsung ditandai lunas.
+                </p>
+                <div class="mb-3">
+                    <label class="form-label">Metode</label>
+                    <select id="manualPayMethod" class="form-select">
+                        <option value="cash">Tunai</option>
+                        <option value="transfer">Transfer Manual</option>
+                    </select>
+                </div>
+                <div class="mb-0">
+                    <label class="form-label">Catatan (opsional)</label>
+                    <textarea id="manualPayNotes" class="form-control" rows="2" placeholder="Contoh: dibayar langsung di kantor"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                <button type="button" class="btn btn-primary" onclick="submitManualPayment()">Catat sebagai Lunas</button>
             </div>
         </div>
     </div>
@@ -174,6 +210,7 @@ async function viewDetail(id) {
     currentInvoiceId = i.id;
     currentInvoiceNumber = i.invoice_number;
     document.getElementById('detailQrisBtn').classList.toggle('d-none', i.status === 'paid');
+    document.getElementById('detailManualPayBtn').classList.toggle('d-none', i.status === 'paid');
     document.getElementById('detailBody').innerHTML = `
         <table class="table table-sm mb-0">
             <tr><th>No. Tagihan</th><td>${i.invoice_number}</td></tr>
@@ -211,6 +248,33 @@ async function showOwnerQris() {
         `;
     } catch (err) {
         if (err.message !== 'Unauthenticated') box.innerHTML = '<div class="alert alert-danger mb-0">Gagal memuat QR.</div>';
+    }
+}
+
+function showManualPaymentModal() {
+    document.getElementById('manualPayMethod').value = 'cash';
+    document.getElementById('manualPayNotes').value = '';
+    new bootstrap.Modal(document.getElementById('manualPaymentModal')).show();
+}
+
+async function submitManualPayment() {
+    const method = document.getElementById('manualPayMethod').value;
+    const notes = document.getElementById('manualPayNotes').value;
+
+    try {
+        const body = await nethubFetch(`/api/owner/invoices/${currentInvoiceId}/pay-manual`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ method, notes }),
+        });
+        if (!body.success) { showMessage('error', body.message); return; }
+
+        bootstrap.Modal.getInstance(document.getElementById('manualPaymentModal')).hide();
+        bootstrap.Modal.getInstance(document.getElementById('detailModal'))?.hide();
+        showMessage('success', body.message);
+        loadInvoices(currentPage);
+    } catch (err) {
+        if (err.message !== 'Unauthenticated') showMessage('error', 'Gagal mencatat pembayaran.');
     }
 }
 

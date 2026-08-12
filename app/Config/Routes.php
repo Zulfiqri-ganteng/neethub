@@ -99,6 +99,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('invoices/(:num)', 'InvoiceController::show/$1', ['filter' => 'permission:invoices.view']);
         $routes->get('invoices/(:num)/qris', 'InvoiceController::qris/$1', ['filter' => 'permission:invoices.view']);
         $routes->get('invoices/(:num)/pdf', 'InvoiceController::pdf/$1', ['filter' => 'permission:invoices.view']);
+        $routes->post('invoices/(:num)/pay-manual', 'InvoiceController::payManual/$1', ['filter' => 'permission:payments.verify']);
 
         $routes->get('routers', 'RouterController::index', ['filter' => 'permission:routers.view']);
         $routes->post('routers', 'RouterController::create', ['filter' => 'permission:routers.create']);

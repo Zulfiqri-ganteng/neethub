@@ -1736,12 +1736,183 @@ issued invoices are never rewritten), and trial tenants stay free regardless of 
   correctly end-to-end, not just that *a* page rendered.
   **Both Android and web sides of this feature are now done.** Only remaining gap:
   the migration hasn't been run on production yet (see below).
-- **Not yet done**: the `platform_pricing_tiers` migration + this whole feature is still
-  **local-dev only** — production (`neethub.my.id`) hasn't had `git pull` + `php spark migrate` run
-  against it yet, same outstanding step as the refresh-token change earlier this session. Until
-  that happens, production billing still resolves every tenant's platform invoice off the old flat
-  `platform_settings.monthly_fee` — harmless (that's the same fallback this feature always uses for
-  an empty tier table), just means the tiered pricing isn't live yet.
+- **Not yet done**: whether the `platform_pricing_tiers` migration has actually run against
+  production is unconfirmed as of the 2026-08-07 domain migration below — the code is there (this
+  repo's `main` branch, freshly cloned into `public_html/neethub.my.id`), but nobody explicitly ran
+  `php spark migrate` in that new folder during the migration session. **Run it once to be sure**
+  before assuming this or the mobile-app-fields migration (next section) are live. Until confirmed,
+  production billing may still be resolving every tenant's platform invoice off the old flat
+  `platform_settings.monthly_fee` fallback — harmless either way, just means tiered pricing might
+  not be live yet.
+
+### Android update-checker + app-wide maintenance kill switch — backend half (2026-08-07)
+
+Ported from the sibling "Galajuara" project's proven design (same author, `C:\xampp\htdocs\galajuara`)
+at the Flutter session's request — full narrative and the Android-side half live in
+`C:\Flutter-NEETHUB\CLAUDE.md` (search "Android update-checker"); this repo's own `CLAUDE.md` never
+got a matching entry until this note, even though the code has been in this repo since migration
+`2026-08-07-160000_AddMobileAppFieldsToPlatformSettings` — flagged and fixed during a 2026-08-07
+documentation audit.
+
+- **Migration**: adds `mobile_apk_file/version/build/size/notes/uploaded_at`, `mobile_min_build`
+  (default 1, the force-update floor), `mobile_maintenance` (default 0, app-wide kill switch),
+  `mobile_maintenance_msg` to `platform_settings`.
+- **`app/Services/ApkService.php`** — the APK itself is **never** uploaded through PHP (shared
+  hosting's upload limits are far below a real Flutter release APK's size); it's placed directly
+  into `public/projectneethub/apk/` (via FTP, or `publishApk` below where the hosting's PHP upload
+  limit allows it) and this service only manages metadata. `readApkInfo()`/`parseManifestAxml()` is
+  a hand-written binary AXML (Android's compiled XML format) parser that reads `versionCode`/
+  `versionName` straight out of the uploaded `.apk`'s own `AndroidManifest.xml` — deliberately not
+  a hand-typed version number, so "update available" can never drift out of sync with the real file
+  from a typo. `register()` validates the file (ZIP signature + `AndroidManifest.xml` present),
+  deletes every other `.apk` in the folder (shared hosting disk is limited, and a stale old file
+  could otherwise be served by guessing its URL), and writes the `mobile_apk_*` columns.
+- **`app/Controllers/Api/AppController.php`**: `GET /api/app/version` (public, no auth — called
+  before any login exists) returns `min_build`/`apk_available`/`apk_url`/`apk_build`/`maintenance`
+  etc. `POST /api/app/apk/register` (metadata-only, auth via `X-Apk-Token` header constant-time-
+  compared against `APK_UPLOAD_TOKEN` in `.env` — deliberately not a user session, since this is
+  meant to be called by a deploy script) assumes the file is already sitting in the folder via FTP.
+  `POST /api/app/apk/publish` accepts the `.apk` file directly over HTTPS multipart (single
+  connection, unlike FTP's separate data channel — works from networks where FTP gets blocked) and
+  calls `register()` internally after saving the file — **only usable when the host's real
+  `upload_max_filesize`/`post_max_size` are large enough**; this specific Rumahweb account caps both
+  at 10M with no `MultiPHP INI Editor` to raise it, so a real ~60MB release APK gets a defensive
+  `413` here and FTP + `register` remains the actual working path for this hosting account
+  specifically (confirmed by hitting this exact wall during the Flutter session's real test).
+- **`PlatformSettingController::update()`** allow-list extended with `mobile_min_build`/
+  `mobile_maintenance`/`mobile_maintenance_msg` only — `mobile_apk_*` deliberately excluded, so
+  there's no path for a Super Admin to hand-edit the "source of truth" APK metadata and defeat the
+  auto-detect safety net.
+- **Both Super Admin settings UIs** (web `superadmin/settings.php` + the Android app) show the
+  current APK version/build/notes read-only, plus editable min-build and maintenance toggle+message
+  — same "don't forget the web one, there are two independent UIs hitting the same endpoint" lesson
+  already learned once for the Google Client ID field (see Flutter `CLAUDE.md` item 34).
+- **Verified locally end-to-end**: a real release APK copied into a simulated `projectneethub/apk/`
+  folder, `register` called for real — the AXML parser correctly read back the actual
+  version/build, matching `pubspec.yaml` exactly (`auto_detected: true`); `GET /api/app/version`
+  reflected it immediately; Super Admin settings PUT for the 3 editable fields also verified.
+- **⚠️ Not verified against production, and the Android-side consumer of this API has never run on
+  a real device** — see `Flutter-NEETHUB/CLAUDE.md` items 38-39 for the full account, including a
+  hard warning: don't lower `mobile_min_build` above 1 or flip `mobile_maintenance` on in
+  production until the Android redirect gate has been through a real `flutter run` pass on physical
+  hardware — a bug there doesn't fail quietly, it can lock every user out of login entirely.
+
+### Production domain migration cleanup: `neethub.kangmuslim.com` → `neethub.my.id` (2026-08-07)
+
+Closes out exactly the "next session should start here" list the Flutter session's `CLAUDE.md` item
+39 left behind (search that file for "Next session should start here") — done from a dedicated
+cPanel-terminal session, not this repo's own tooling (no direct server access from here; every step
+below was relayed as copy-paste terminal commands and verified from screenshots the user sent back).
+
+- **Old deployment fully removed**: `public_html/neethub.kangmuslim.com` (by the time this session
+  started, already manually stripped down to just a stray `.git/` the user couldn't delete via
+  cPanel File Manager — "Directory not empty" errors, likely from git's own internal file
+  permissions tripping up the GUI tool) was deleted cleanly via `rm -rf` from cPanel's web Terminal.
+  The `neethub.kangmuslim.com` subdomain itself had already been removed by the user beforehand.
+- **Confirmed real path structure, resolving an ambiguity from `Flutter-NEETHUB/CLAUDE.md` item 39**:
+  `public_html` is a symlink to `kangmuslim/public` on this hosting account (confirmed directly —
+  `git init` inside `~/public_html/neethub.my.id` reported `Initialized empty Git repository in
+  /home/kank9494/kangmuslim/public/neethub.my.id/.git/`). So `public_html/neethub.kangmuslim.com`
+  and `kangmuslim/public/neethub.kangmuslim.com` (item 39's two "different" locations) were always
+  the same physical directory — item 39's confusion was very likely just seeing that same path
+  through two different tools (FTP client's chroot view vs. cPanel File Manager), not two real
+  copies. The "second unused copy with its own `index.php`" item 39 also mentions was gone by the
+  time this session started — the user had evidently already cleaned most of it by hand, which is
+  consistent with why only a stubborn `.git/` was left for this session to finish off.
+- **Fresh deploy into `public_html/neethub.my.id`** (a domain the user already had pointed at this
+  folder via cPanel's Domains page, `.env` already copied over from the old deployment, already
+  correctly `CI_ENVIRONMENT=production` / `app.baseURL='https://neethub.my.id/'` /
+  `database.default.database=kank9494_neethub`): `git init` + `git remote add origin` + `git fetch`
+  + `git checkout -b main origin/main` directly into the folder (not `git clone`, since `.env` was
+  already present — `.gitignore` already excludes it, so no conflict). `vendor/` is intentionally
+  committed to this repo specifically for hosts like this one with no `composer` CLI access, so no
+  `composer install` step was needed.
+- **Two real gaps found and fixed during first boot on the new path**:
+  1. `writable/cache/` didn't exist (git doesn't track empty directories) → `CacheException: Cache
+     unable to write to .../writable/cache/`. Fixed with a plain `mkdir -p`.
+  2. `CI_ENVIRONMENT` briefly flipped to `development` mid-session to see the real error above (per
+     this file's own established practice), then explicitly flipped back to `production` once
+     confirmed working — don't leave it on `development` in production, per the Security Checklist.
+- **cPanel Cron Jobs updated** — all 6 jobs (`notifications:send`, `router:sync`,
+  `payments:reconcile`, `invoices:generate`, `invoices:remind`, `platform:billing`) still pointed
+  their `spark` path at the now-deleted `neethub.kangmuslim.com` folder. Fixed in one shot via
+  `crontab -l | sed 's/neethub\.kangmuslim\.com/neethub.my.id/g' | crontab -` rather than deleting
+  and re-adding each one through the cPanel UI — same schedules, just the folder in the command
+  path swapped. Verified via `crontab -l` afterward.
+- **FTP account created for the APK-release workflow** (`app/Services/ApkService.php` above,
+  originally scoped by the Flutter session but never successfully pointed at a *working* path — see
+  that session's item 39): `project-fluter-neethub@neethub.my.id`, chrooted to
+  `public_html/neethub.my.id/public/projectneethub/apk` — the exact folder `ApkService::dir()`
+  reads from (`FCPATH . 'projectneethub/apk/'`). The folder didn't exist yet (cPanel normally
+  creates it automatically on FTP-account creation, but the Directory field's auto-suggested value
+  got submitted instead of the corrected one on the first attempt, so it silently fell back to the
+  account's whole home directory as the FTP root — confirmed via `ls -la ~/public_html/...` coming
+  back "No such file or directory", not by trusting the account-summary table alone) — created
+  manually via `mkdir -p` instead of recreating the FTP account a second time. **The FTP account's
+  actual root is still the whole home directory** (`/home/kank9494`, not scoped down to just the
+  APK folder) — broader access than ideal (can browse every domain/project on this hosting account,
+  not just this one), left as-is at the user's own "santai" call for now; tighten later by deleting
+  and recreating the account with Directory typed via select-all-then-replace instead of appending
+  to the auto-suggested value.
+- **Not yet done, flagged for the next session picking this up**: (1) no `.apk` file has actually
+  been uploaded to the new folder yet, so `POST /api/app/apk/register` has never succeeded against
+  this path — `mobile_apk_*`/`apk_available` on production are presumably still at their migration
+  defaults; (2) `php spark migrate` was never explicitly re-run in the new folder during this
+  session (the underlying MySQL database didn't move, so most migrations are almost certainly
+  already applied from the old deployment's own migrate runs, but this wasn't explicitly confirmed
+  — worth a quick `php spark migrate` just to be sure, especially for the two most recent
+  migrations, pricing tiers and mobile-app-fields); (3) a stray FTP account from the old domain,
+  `neethub@neethub.kangmuslim.com` (per Flutter `CLAUDE.md` item 39), may still exist in cPanel
+  pointed at a now-deleted path — worth checking/deleting for real "bersih total"; (4) `.env`'s
+  `JWT_REFRESH_EXPIRY` on this production `.env` is still the old `604800` (7 days) value — local
+  dev was already shortened to `86400` (24h) back on 2026-08-06 for security reasons (see that
+  section above) but production was never updated to match, and this migration carried the old
+  value forward unchanged.
+
+### Staff-initiated manual payment recording (`POST /owner/invoices/{id}/pay-manual`) — done (2026-08-12)
+
+A real gap found by a Flutter-session parity audit: every payment path (`submitPayment`,
+`initiateGatewayPayment`) required a *customer* to originate the record — an owner/admin/kasir could
+only ever `verify()`/reject something a customer had already submitted, never mark an invoice paid
+on their own. This blocks the common "notebook style" RT/RW-net workflow — a customer pays cash or
+transfers outside the app, the tenant admin writes it in a physical book/receipt, no portal
+involved. The `payments.payment_method` ENUM already had `'cash'` (see `CreatePayments` migration)
+but nothing ever produced a row with it — vestigial.
+
+- New `PaymentService::recordManual(array $invoice, string $method, ?string $notes, int
+  $recordedByUserId)` (`app/Services/PaymentService.php`) — validates `$method` is `cash` or
+  `transfer`, rejects an already-`paid` invoice, creates a `pending` payment row for the invoice's
+  full `total_amount` (no partial-payment support, matches every other payment path's behavior),
+  then reuses the existing private `finalizePayment(..., approve: true, ...)` — so it gets the exact
+  same activity log + WhatsApp `payment_confirmation` notification a normal verified payment would,
+  for free.
+- New `Owner\InvoiceController::payManual($id)` — body `{ method: 'cash'|'transfer', notes?: string
+  }`, defaults `method` to `'cash'` if omitted. New route
+  `POST invoices/(:num)/pay-manual`, gated by `permission:payments.verify` (same permission as the
+  existing `verify` action — owner/admin/kasir all have it, teknisi/pelanggan don't, confirmed via
+  `RolePermissionSeeder`).
+- **Verified end-to-end against the real local dev server**, not just code review: logged in as the
+  real demo owner, listed real unpaid invoices, called the new endpoint — confirmed invoice flipped
+  `unpaid` → `paid`, `payment.status` came back `verified` with `verified_by` set to the staff user
+  and `paid_at`/`verified_at` populated. Also confirmed: calling it again on an already-paid invoice
+  → `422` "Tagihan ini sudah lunas."; an invalid `method` → `422`; omitting `method` → defaults to
+  `cash` and still succeeds; a `teknisi` JWT (no `payments.verify`) → `403`. All test payment/
+  activity rows deleted afterward, invoice statuses reset.
+- **Android UI done in the same pass** — see Flutter `CLAUDE.md`'s own new Progress item for detail.
+- **Web UI also done, same session, right after Android** (user explicitly asked for it: "web dan
+  android wajib sinkron"). `app/Views/owner/invoices.php`: new "Catat Pembayaran Manual" button in
+  the existing detail modal's footer (toggled `d-none` alongside the existing QRIS button — same
+  `status !== 'paid'` condition), new `manualPaymentModal` (method `<select>` Tunai/Transfer +
+  optional notes `<textarea>`), `submitManualPayment()` posts to the same
+  `/api/owner/invoices/{id}/pay-manual` endpoint via the existing `nethubFetch()` helper, closes
+  both modals and reloads the list on success. `payments.php` needed **zero** changes — its
+  `methodLabel`/status-filter already had `cash` wired up from before (vestigial, now finally
+  produces real rows). Verified via `php -l` (clean) + a Node `--check` syntax pass on the extracted
+  inline `<script>` (clean) — **not** click-tested in a real browser, matching this project's own
+  established limitation noted in Flutter `CLAUDE.md` item 37 (the web app's session-cookie auth
+  can't be driven via a bare `curl` the way the JWT API can); the underlying REST endpoint itself was
+  already proven correct end-to-end earlier in this same session, so what's unverified here is purely
+  the DOM/JS wiring, not the business logic.
 
 ## Cross-cutting requirements to not lose track of
 

@@ -187,6 +187,44 @@ class PaymentService
     }
 
     /**
+     * Staff-side manual payment entry — the owner/admin/kasir personally
+     * collected cash (or an out-of-band transfer never submitted through
+     * the customer portal) and wants the invoice marked paid immediately,
+     * with no customer submission involved at all. Reuses finalizePayment()
+     * so it gets the same activity log + WhatsApp payment-confirmation
+     * notification a normal verified payment would.
+     *
+     * @return array{payment: array, invoice: array}
+     */
+    public function recordManual(array $invoice, string $method, ?string $notes, int $recordedByUserId): array
+    {
+        if ($invoice['status'] === 'paid') {
+            throw new RuntimeException('Tagihan ini sudah lunas.');
+        }
+
+        if (! in_array($method, ['cash', 'transfer'], true)) {
+            throw new RuntimeException('Metode pembayaran manual tidak valid.');
+        }
+
+        $paymentId = $this->payments->create([
+            'invoice_id'     => $invoice['id'],
+            'customer_id'    => $invoice['customer_id'],
+            'payment_method' => $method,
+            'amount'         => $invoice['total_amount'],
+            'status'         => 'pending',
+        ]);
+
+        (new ActivityModel())->log(
+            'payment_recorded_manual',
+            TenantHelper::id(),
+            $recordedByUserId,
+            "Pembayaran manual dicatat untuk tagihan {$invoice['invoice_number']}"
+        );
+
+        return $this->finalizePayment($this->payments->find($paymentId), true, $recordedByUserId, $notes);
+    }
+
+    /**
      * @return array{payment: array, invoice: array}
      */
     public function verify(int $paymentId, int $verifiedByUserId, bool $approve, ?string $notes): array
