@@ -85,4 +85,44 @@ class TenantController extends BaseApiController
 
         return $this->ok($tenantModel->find((int) $id), 'Tenant berhasil diaktifkan kembali.');
     }
+
+    /**
+     * Lets a Super Admin set exactly when a tenant's trial ends — e.g. a
+     * manually-negotiated deal outside the normal recurring platform
+     * billing (a tenant who only wants to pay once, a longer trial as a
+     * favor, etc). Body: { "trial_ends_at": "YYYY-MM-DD" }.
+     *
+     * Accepts any date, past or future — a past date effectively ends the
+     * trial immediately (the next `platform:billing` run will bill them
+     * for real), a future date (however far — a year, several years) keeps
+     * the tenant exempt from billing until then. Same `trial_ends_at`
+     * field, same comparison, `PlatformBillingService::generateForTenant()`
+     * already reads — no separate "exempt" flag needed.
+     */
+    public function extendTrial($id = null)
+    {
+        $tenantModel = new TenantModel();
+        $tenant      = $tenantModel->find((int) $id);
+        if (! $tenant) {
+            return $this->notFound('Tenant tidak ditemukan.');
+        }
+
+        $data = $this->request->getJSON(true) ?? $this->request->getPost();
+        $date = trim((string) ($data['trial_ends_at'] ?? ''));
+
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || ! strtotime($date)) {
+            return $this->validationError(['trial_ends_at' => 'Tanggal wajib diisi dengan format YYYY-MM-DD.']);
+        }
+
+        $tenantModel->update((int) $id, ['trial_ends_at' => $date . ' 23:59:59']);
+
+        (new ActivityModel())->log(
+            'tenant_trial_updated',
+            (int) $id,
+            null,
+            "Masa trial tenant {$tenant['name']} diatur Super Admin sampai {$date}"
+        );
+
+        return $this->ok($tenantModel->find((int) $id), 'Masa trial berhasil diperbarui.');
+    }
 }

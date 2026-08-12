@@ -66,6 +66,32 @@
     </div>
 </div>
 
+<!-- Trial modal -->
+<div class="modal fade" id="trialModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Atur Masa Trial</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    Tenant tidak akan ditagih platform selama masih dalam masa trial — bisa diisi
+                    jauh ke depan (mis. 1 tahun) untuk kesepakatan khusus di luar tagihan bulanan
+                    normal.
+                </p>
+                <div id="trialError" class="alert alert-danger d-none small"></div>
+                <label for="trialDate" class="form-label">Trial Sampai Tanggal</label>
+                <input id="trialDate" type="date" class="form-control">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                <button type="button" class="btn btn-primary" onclick="submitTrial()">Simpan</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?= $this->endSection() ?>
 
 <?= $this->section('scripts') ?>
@@ -108,6 +134,15 @@ async function loadTenant() {
             <div class="col-md-3"><div class="small text-muted">WhatsApp</div><div>${t.whatsapp || '-'}</div></div>
             <div class="col-md-3"><div class="small text-muted">Plan</div><div class="text-capitalize">${t.plan}</div></div>
             <div class="col-md-3"><div class="small text-muted">Status</div><div>${tenantStatusBadge(t.status)} ${t.suspended_reason ? `<span class="small text-muted">(${t.suspended_reason})</span>` : ''}</div></div>
+            <div class="col-md-3">
+                <div class="small text-muted">Trial s/d</div>
+                <div>${t.trial_ends_at ? t.trial_ends_at.substring(0, 10) : '-'}</div>
+            </div>
+            <div class="col-md-9 d-flex align-items-end">
+                <button class="btn btn-sm btn-outline-primary" onclick="openTrialModal('${t.trial_ends_at ? t.trial_ends_at.substring(0, 10) : ''}')">
+                    <i class="ti ti-calendar-event"></i> Atur Masa Trial
+                </button>
+            </div>
         </div>
     `;
 
@@ -181,6 +216,40 @@ async function reactivateTenant() {
     const body = await nethubFetch(`/api/superadmin/tenants/${tenantId}/reactivate`, { method: 'POST' });
     showMessage(body.success ? 'success' : 'error', body.message);
     if (body.success) loadTenant();
+}
+
+function openTrialModal(currentDate) {
+    document.getElementById('trialError').classList.add('d-none');
+    document.getElementById('trialDate').value = currentDate || '';
+    new bootstrap.Modal(document.getElementById('trialModal')).show();
+}
+
+async function submitTrial() {
+    const date = document.getElementById('trialDate').value;
+    const errBox = document.getElementById('trialError');
+    errBox.classList.add('d-none');
+
+    if (!date) {
+        errBox.textContent = 'Tanggal wajib diisi.';
+        errBox.classList.remove('d-none');
+        return;
+    }
+
+    const body = await nethubFetch(`/api/superadmin/tenants/${tenantId}/trial`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trial_ends_at: date }),
+    });
+
+    if (!body.success) {
+        errBox.textContent = body.errors ? Object.values(body.errors)[0] : (body.message || 'Gagal menyimpan.');
+        errBox.classList.remove('d-none');
+        return;
+    }
+
+    bootstrap.Modal.getInstance(document.getElementById('trialModal')).hide();
+    showMessage('success', body.message);
+    loadTenant();
 }
 
 loadTenant();

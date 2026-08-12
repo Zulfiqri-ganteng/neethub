@@ -148,6 +148,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('tenants/(:num)', 'TenantController::show/$1');
         $routes->post('tenants/(:num)/suspend', 'TenantController::suspend/$1');
         $routes->post('tenants/(:num)/reactivate', 'TenantController::reactivate/$1');
+        $routes->post('tenants/(:num)/trial', 'TenantController::extendTrial/$1');
 
         $routes->get('platform-payments/pending', 'PlatformPaymentController::pending');
         $routes->get('platform-payments/(:num)/proof', 'PlatformPaymentController::proof/$1');

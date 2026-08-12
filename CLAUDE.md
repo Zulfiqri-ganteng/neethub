@@ -1965,6 +1965,43 @@ and asked for it, "wajib profesional" (must be professional-quality).
   actually completing a Google OAuth popup flow needs a real Google account interacting with a real
   browser, which no amount of `curl` can substitute for.
 
+### Super Admin: manually set a tenant's trial end date — done (2026-08-12, same day, later session)
+
+The user wants to onboard a friend's RT/RW-net business as a favor deal — friend pays a one-time
+Rp500rb outside the app entirely, no recurring monthly platform billing. Walked through the options
+conversationally first (no code): confirmed `trial_ends_at` is a plain date column with no max-length
+enforcement anywhere in code, and `PlatformBillingService::generateForTenant()` (see above) already
+treats "trial not yet ended" as fully exempt from billing regardless of how far out the date is — so
+setting it to exactly 1 year out works mechanically identically to 30 days. The only gap: **no
+Super Admin UI/API existed to actually set that date** — `SuperAdmin\TenantController` only had
+`index`/`show`/`suspend`/`reactivate`, nothing trial-related — so a Super Admin's only option was raw
+SQL via phpMyAdmin. User asked for a real button instead.
+
+- New `TenantController::extendTrial($id)` — body `{ "trial_ends_at": "YYYY-MM-DD" }`, validates the
+  format + that it's a real date, updates `tenants.trial_ends_at` to `{date} 23:59:59`, logs a
+  `tenant_trial_updated` activity. New route `POST superadmin/tenants/(:num)/trial` (same
+  `jwtauth:super_admin` group as suspend/reactivate, no extra `permission:` filter needed since
+  super_admin already has the `['*']` wildcard). Deliberately accepts **any** date, past or future —
+  a past date effectively ends the trial on the next `platform:billing` cron run (a way to shorten a
+  trial too, not just extend it), not just a future one.
+- **Verified end-to-end against the real local dev server**: valid extend to exactly 1 year out →
+  `200`, confirmed `trial_ends_at` came back updated; invalid format (`"12 Agustus 2027"`) → `422`
+  with a field-level validation error; nonexistent tenant → `404`; an `owner` JWT (not super_admin)
+  → `403`. All test mutations reverted afterward (tenant's `trial_ends_at` restored to its original
+  value, test activity log row deleted).
+- **Android**: new `SuperAdminRepository.updateTenantTrial()`, new "Atur Masa Trial" text-button in
+  `SuperAdminTenantDetailScreen`'s existing "Langganan" card (right where "Trial s/d" is already
+  displayed) — opens `showDatePicker` (range: 1 year back to 10 years forward, generous enough to
+  cover both "shorten" and "long-term favor deal" cases), formats the picked date as `YYYY-MM-DD`,
+  calls the endpoint, invalidates the tenant-detail provider to refresh. `flutter analyze`: 0 issues.
+- **Web**: new "Atur Masa Trial" button + `trialModal` (a plain `<input type="date">`) on
+  `app/Views/superadmin/tenant_detail.php`, same endpoint via `nethubFetch()`. `php -l` clean, JS
+  syntax-checked via Node `--check` (the file's pre-existing `<?= (int) $tenantId ?>` PHP
+  interpolation was substituted with a literal for the syntax-check only, not a real code change).
+- **Not click-tested in a real browser or on a real Android device** — same standing limitation as
+  every other web/Android UI change today; the underlying endpoint itself was proven correct via
+  real HTTP calls, what's unverified is purely the UI wiring.
+
 ## Cross-cutting requirements to not lose track of
 
 `docs/SPEC.md` has a Testing Strategy, Deployment Strategy, Performance Targets, Migration/Data
