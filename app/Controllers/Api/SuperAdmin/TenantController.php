@@ -125,4 +125,30 @@ class TenantController extends BaseApiController
 
         return $this->ok($tenantModel->find((int) $id), 'Masa trial berhasil diperbarui.');
     }
+
+    /**
+     * Soft-delete only — `TenantModel::$useSoftDeletes` is already true, so
+     * this just stamps `deleted_at` rather than a real `DELETE FROM`. That
+     * alone is enough to fully lock the tenant out: `AuthController::
+     * assertUserCanLogin()` looks the tenant up via `TenantModel::find()`,
+     * which (like every other Model call) transparently excludes
+     * soft-deleted rows, so every one of their staff/customer logins starts
+     * failing immediately. Nothing else cascades — customers/invoices/
+     * payments/etc. are untouched and fully recoverable by clearing
+     * `deleted_at` directly, unlike a real hard delete.
+     */
+    public function destroy($id = null)
+    {
+        $tenantModel = new TenantModel();
+        $tenant      = $tenantModel->find((int) $id);
+        if (! $tenant) {
+            return $this->notFound('Tenant tidak ditemukan.');
+        }
+
+        $tenantModel->delete((int) $id);
+
+        (new ActivityModel())->log('tenant_deleted', (int) $id, null, "Tenant {$tenant['name']} dihapus oleh Super Admin");
+
+        return $this->ok(null, 'Tenant berhasil dihapus.');
+    }
 }
