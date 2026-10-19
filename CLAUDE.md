@@ -2041,6 +2041,54 @@ remove a tenant.
 - Not click-tested in a real browser/device — same standing caveat as every other UI-only change
   today.
 
+### MikroTik sync hardening ("Fase 1") — done (2026-10-19), ahead of the first real client onboarding
+
+The first real client (a school's MikroTik) was due the next day, and `MikroTikDriver` had still
+never touched a real router (Stage 4's caveat). A re-audit found three real gaps on top of that, all
+closed here:
+- **Deleting a customer never removed their PPPoE secret.** The deleted customer could keep using the
+  internet for free. `delete()` now calls a new `RouterService::removeCustomer()`, and
+  `MikroTikDriver::removeUser()` also kicks the live session. `removeUser()` is now a no-op if the
+  secret is already gone. Delete responses carry `router_sync`, and both UIs show it.
+- **Editing a customer only ever synced a package change.** Router/PPPoE assigned for the first time
+  via edit (the gap Stage 4's re-review already flagged), a changed PPPoE password, a renamed
+  username, a router move, and unlinking all did nothing on the router. Replaced
+  `updateCustomerSpeed()` (removed) with `RouterService::syncCustomerChange($before, $after,
+  $package, $passwordChanged)`:
+  - It removes the old secret when the router or username changed, or when the customer was
+    unlinked.
+  - It then upserts the full desired state: stored password, package speed, and disabled if NetHub
+    has the customer suspended/disabled, so a re-push never re-enables a suspended customer.
+  - It skips entirely when nothing router-relevant changed.
+- **`addUser` failed if the secret already existed.** That's the normal case when migrating an
+  ISP/school whose secrets were made by hand. New `upsertUser()` on the driver interface adopts an
+  existing secret instead. It overwrites password/rate-limit/disabled but keeps the router's own
+  profile/service, since a school may use custom PPP profiles, then kicks the session so the change
+  applies now.
+- Smaller hardening:
+  - `MikroTikApiClient::talk()` closes the socket on `!trap`. RouterOS sends a `!done` after the
+    trap that we never read, so reusing the connection would desync replies.
+  - A rejected login now surfaces as "Login ke router ditolak (<RouterOS reason>)…" instead of a raw
+    message.
+  - `api_scheme=ssh` is rejected with a clear 422 in `RouterController`. The driver never spoke SSH,
+    and neither UI offered it.
+- **Verified against a mock RouterOS API server**, not just `php -l`. It's a standalone PHP script
+  written for this session that speaks the length-prefixed word protocol independently of
+  `MikroTikApiClient`, keeps `/ppp/secret` + `/ppp/active` state, and sends `!trap`+`!done` like real
+  RouterOS. It was not committed to the repo. All 27 scenarios passed through the real local API:
+  - create/link-via-edit/password change/package change/rename
+  - suspend, then package change, stays disabled; enable
+  - adopt a pre-existing secret (custom profile kept, live session kicked)
+  - move between two routers; unlink; delete
+  - wrong-password and dead-port routers
+  - `monitoring/traffic`, `routers/{id}/online-users`, `router:sync`
+
+  This is the first time the protocol client and every driver command have run against *any*
+  protocol peer. **Still not proven against real RouterOS hardware.** The mock shares the author's
+  reading of the spec. Test rows were deleted afterward.
+- No migration. Backward-compatible with already-installed APKs (they ignore the new
+  `router_sync` key on delete).
+
 ## Cross-cutting requirements to not lose track of
 
 `docs/SPEC.md` has a Testing Strategy, Deployment Strategy, Performance Targets, Migration/Data

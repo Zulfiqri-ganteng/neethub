@@ -98,7 +98,92 @@ class RouterService
      */
     public function addCustomer(array $customer, array $package): string
     {
-        if (empty($customer['router_id']) || empty($customer['pppoe_username']) || empty($customer['pppoe_password'])) {
+        return $this->pushCustomer($customer, $package);
+    }
+
+    /**
+     * Called after a customer edit with the row as it was before and after.
+     * Covers everything the old package-only sync missed: router/PPPoE
+     * assigned for the first time via edit, PPPoE username or password
+     * changed, moved to a different router, or unlinked from the router.
+     * Pushes the full desired state (upsert), so it also self-heals a secret
+     * that never reached the router because it was offline at create time.
+     *
+     * @param bool $passwordChanged whether the edit payload carried a new
+     *                              pppoe_password (the stored value is
+     *                              ciphertext, so before/after can't be
+     *                              compared directly)
+     */
+    public function syncCustomerChange(array $before, array $after, ?array $package, bool $passwordChanged): string
+    {
+        $wasLinked = $this->isLinked($before);
+        $isLinked  = $this->isLinked($after);
+
+        $identityChanged = (int) ($before['router_id'] ?? 0) !== (int) ($after['router_id'] ?? 0)
+            || ($before['pppoe_username'] ?? '') !== ($after['pppoe_username'] ?? '');
+
+        $packageChanged = (int) ($before['package_id'] ?? 0) !== (int) ($after['package_id'] ?? 0);
+
+        if (! $wasLinked && ! $isLinked) {
+            return 'skipped';
+        }
+
+        if ($wasLinked && $isLinked && ! $identityChanged && ! $packageChanged && ! $passwordChanged) {
+            return 'skipped';
+        }
+
+        $results = [];
+
+        // Old secret has to go when the customer moved router, got a new
+        // username, or was unlinked — otherwise it lingers on the router as
+        // a working login nobody in NetHub knows about anymore.
+        if ($wasLinked && ($identityChanged || ! $isLinked)) {
+            $results[] = $this->removeCustomer($before);
+        }
+
+        if ($isLinked) {
+            $results[] = $this->pushCustomer($after, $package);
+        }
+
+        return $this->combine($results);
+    }
+
+    /**
+     * Removes the customer's PPPoE secret (and live session) from their
+     * router — used on customer delete, so a deleted customer can't keep
+     * using the internet for free.
+     */
+    public function removeCustomer(array $customer): string
+    {
+        if (! $this->isLinked($customer)) {
+            return 'skipped';
+        }
+
+        $router = $this->routers->find((int) $customer['router_id']);
+        if (! $router) {
+            return 'skipped';
+        }
+
+        try {
+            RouterDriverFactory::make($router)->removeUser($customer['pppoe_username']);
+
+            return 'success';
+        } catch (Throwable $e) {
+            log_message('error', "Router removeUser failed for customer {$customer['id']}: {$e->getMessage()}");
+
+            return 'failed';
+        }
+    }
+
+    /**
+     * Upserts the customer's secret with their full current state: stored
+     * password, package speed, and disabled when NetHub has them
+     * suspended/disabled — so re-pushing never accidentally re-enables a
+     * suspended customer.
+     */
+    private function pushCustomer(array $customer, ?array $package): string
+    {
+        if (! $this->isLinked($customer) || empty($customer['pppoe_password']) || $package === null) {
             return 'skipped';
         }
 
@@ -109,57 +194,43 @@ class RouterService
 
         $password = CryptoHelper::decrypt($customer['pppoe_password']);
         if ($password === null) {
-            log_message('error', "Router addUser skipped for customer {$customer['id']}: PPPoE password could not be decrypted.");
+            log_message('error', "Router upsertUser skipped for customer {$customer['id']}: PPPoE password could not be decrypted.");
 
             return 'failed';
         }
 
         try {
-            RouterDriverFactory::make($router)->addUser(
+            RouterDriverFactory::make($router)->upsertUser(
                 $customer['pppoe_username'],
                 $password,
                 (int) $package['speed_download'],
-                (int) $package['speed_upload']
+                (int) $package['speed_upload'],
+                in_array($customer['status'] ?? '', ['suspended', 'disabled'], true)
             );
 
             return 'success';
         } catch (Throwable $e) {
-            log_message('error', "Router addUser failed for customer {$customer['id']}: {$e->getMessage()}");
+            log_message('error', "Router upsertUser failed for customer {$customer['id']}: {$e->getMessage()}");
 
             return 'failed';
         }
     }
 
-    /**
-     * Pushes an updated rate-limit to the router when a customer's package
-     * changes. `$package` is null when the customer has no package assigned
-     * (nothing to update on the router side in that case).
-     */
-    public function updateCustomerSpeed(array $customer, ?array $package): string
+    private function isLinked(array $customer): bool
     {
-        if (empty($customer['router_id']) || empty($customer['pppoe_username']) || $package === null) {
-            return 'skipped';
-        }
+        return ! empty($customer['router_id']) && ! empty($customer['pppoe_username']);
+    }
 
-        $router = $this->routers->find((int) $customer['router_id']);
-        if (! $router) {
-            return 'skipped';
-        }
-
-        try {
-            RouterDriverFactory::make($router)->updateUser(
-                $customer['pppoe_username'],
-                null,
-                (int) $package['speed_download'],
-                (int) $package['speed_upload']
-            );
-
-            return 'success';
-        } catch (Throwable $e) {
-            log_message('error', "Router updateUser failed for customer {$customer['id']}: {$e->getMessage()}");
-
+    /**
+     * @param string[] $results
+     */
+    private function combine(array $results): string
+    {
+        if (in_array('failed', $results, true)) {
             return 'failed';
         }
+
+        return in_array('success', $results, true) ? 'success' : 'skipped';
     }
 
     private function applyToRouter(array $customer, string $method): string

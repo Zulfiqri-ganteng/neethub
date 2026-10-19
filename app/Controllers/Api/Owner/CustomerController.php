@@ -388,34 +388,42 @@ class CustomerController extends BaseApiController
             'pppoe_username', 'pppoe_password', 'installation_date', 'notes',
         ]));
 
-        if (! $this->customers->update((int) $id, $data)) {
+        $before = $this->customers->find((int) $id);
+
+        if (! $before || ! $this->customers->update((int) $id, $data)) {
             return $this->notFound('Pelanggan tidak ditemukan.');
         }
 
         $customer = $this->customers->find((int) $id);
 
-        // Package change → push the new rate-limit to the router. Best-
-        // effort, same as create/suspend/enable.
-        $routerSync = 'skipped';
-        if (array_key_exists('package_id', $data) && ! empty($customer['package_id'])) {
-            $package = (new PackageModel())->find($customer['package_id']);
-            if ($package) {
-                $routerSync = $this->routerService->updateCustomerSpeed($customer, $package);
-            }
-        }
+        // Router/PPPoE/package changes → bring the router in line with the
+        // edited record. Best-effort, same as create/suspend/enable.
+        $package    = ! empty($customer['package_id']) ? (new PackageModel())->find($customer['package_id']) : null;
+        $routerSync = $this->routerService->syncCustomerChange(
+            $before,
+            $customer,
+            $package,
+            ! empty($data['pppoe_password'])
+        );
 
         return $this->ok([...$customer, 'router_sync' => $routerSync], 'Pelanggan berhasil diperbarui.');
     }
 
     public function delete($id = null)
     {
-        if (! $this->customers->delete((int) $id)) {
+        $customer = $this->customers->find((int) $id);
+
+        if (! $customer || ! $this->customers->delete((int) $id)) {
             return $this->notFound('Pelanggan tidak ditemukan.');
         }
 
-        (new ActivityModel())->log('customer_deleted', TenantHelper::id(), null, "Pelanggan #{$id} dihapus");
+        // A deleted customer's PPPoE secret must not stay usable on the
+        // router. Best-effort like every other router action.
+        $routerSync = $this->routerService->removeCustomer($customer);
 
-        return $this->ok(null, 'Pelanggan berhasil dihapus.');
+        (new ActivityModel())->log('customer_deleted', TenantHelper::id(), null, "Pelanggan #{$id} dihapus (router: {$routerSync})");
+
+        return $this->ok(['router_sync' => $routerSync], 'Pelanggan berhasil dihapus.');
     }
 
     public function suspend($id = null)

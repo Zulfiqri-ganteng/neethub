@@ -15,6 +15,18 @@ interface RouterDriverInterface
 
     public function updateUser(string $username, ?string $password, ?int $downloadMbps, ?int $uploadMbps): void;
 
+    /**
+     * Creates the user, or — if one with this username already exists on
+     * the router (e.g. migrating a customer whose secret was made by hand
+     * before NetHub) — adopts it, overwriting password/speed/disabled to
+     * match NetHub. Null speeds leave the router's current limit untouched.
+     */
+    public function upsertUser(string $username, string $password, ?int $downloadMbps, ?int $uploadMbps, bool $disabled): void;
+
+    /**
+     * No-op if the user doesn't exist on the router (already gone is the
+     * outcome the caller wanted anyway).
+     */
     public function removeUser(string $username): void;
 
     public function suspendUser(string $username): void;

@@ -10,6 +10,17 @@ use RuntimeException;
 
 class RouterController extends BaseApiController
 {
+    /**
+     * `ssh` is still in the `api_scheme` enum, but MikroTikDriver only
+     * speaks the RouterOS API protocol (plain or TLS) — an "ssh" router
+     * would silently be dialed as plain API on the SSH port and always
+     * fail. Neither UI offers it; this closes the API-level gap too.
+     */
+    private const API_SCHEME_RULE = [
+        'rules'  => 'permit_empty|in_list[api,api-ssl]',
+        'errors' => ['in_list' => 'Mode koneksi harus API (port 8728) atau API-SSL (port 8729). SSH belum didukung.'],
+    ];
+
     private RouterRepository $routers;
     private RouterService $routerService;
 
@@ -51,7 +62,7 @@ class RouterController extends BaseApiController
             'port'       => 'permit_empty|integer',
             'username'   => 'required|max_length[100]',
             'password'   => 'required|max_length[100]',
-            'api_scheme' => 'permit_empty|in_list[api,api-ssl,ssh]',
+            'api_scheme' => self::API_SCHEME_RULE,
         ];
 
         if (! $this->validate($rules)) {
@@ -89,7 +100,7 @@ class RouterController extends BaseApiController
             'name'       => 'permit_empty|min_length[2]|max_length[100]',
             'ip_address' => 'permit_empty|max_length[45]',
             'port'       => 'permit_empty|integer',
-            'api_scheme' => 'permit_empty|in_list[api,api-ssl,ssh]',
+            'api_scheme' => self::API_SCHEME_RULE,
         ];
 
         if (! $this->validate($rules)) {

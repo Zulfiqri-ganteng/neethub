@@ -108,6 +108,13 @@ class MikroTikApiClient
             $type = array_shift($sentence);
 
             if ($type === '!trap' || $type === '!fatal') {
+                // RouterOS follows a !trap with its own !done, which we
+                // never read here — closing the socket guarantees a caller
+                // that catches this can't reuse a connection whose next
+                // read would return that stale !done as the reply to a
+                // different command.
+                $this->close();
+
                 throw new RuntimeException($this->extractAttribute($sentence, 'message') ?? 'Perintah router gagal.');
             }
 

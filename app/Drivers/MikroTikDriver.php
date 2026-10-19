@@ -40,16 +40,43 @@ class MikroTikDriver implements RouterDriverInterface
 
     public function addUser(string $username, string $password, int $downloadMbps, int $uploadMbps): void
     {
-        $this->connected()->talk([
-            '/ppp/secret/add',
-            "=name={$username}",
+        $this->upsertUser($username, $password, $downloadMbps, $uploadMbps, false);
+    }
+
+    public function upsertUser(string $username, string $password, ?int $downloadMbps, ?int $uploadMbps, bool $disabled): void
+    {
+        $words = [
             "=password={$password}",
-            '=service=pppoe',
-            '=profile=default',
+            '=disabled=' . ($disabled ? 'yes' : 'no'),
+        ];
+
+        if ($downloadMbps !== null && $uploadMbps !== null) {
             // RouterOS rate-limit format is "rx-rate/tx-rate" from the
             // router's perspective, i.e. upload/download from the client's.
-            "=rate-limit={$uploadMbps}M/{$downloadMbps}M",
-        ]);
+            $words[] = "=rate-limit={$uploadMbps}M/{$downloadMbps}M";
+        }
+
+        $existingId = $this->findSecretIdOrNull($username);
+
+        if ($existingId === null) {
+            $this->connected()->talk([
+                '/ppp/secret/add',
+                "=name={$username}",
+                '=service=pppoe',
+                '=profile=default',
+                ...$words,
+            ]);
+
+            return;
+        }
+
+        // Adopting a secret that already existed (made by hand before
+        // NetHub, or left behind by an earlier failed sync): keep its own
+        // profile/service — a school/ISP may use custom PPP profiles — and
+        // only overwrite what NetHub owns. Kick the live session so the new
+        // password/speed/disabled state applies now, not at next redial.
+        $this->connected()->talk(['/ppp/secret/set', "=.id={$existingId}", ...$words]);
+        $this->kickActiveSession($username);
     }
 
     public function updateUser(string $username, ?string $password, ?int $downloadMbps, ?int $uploadMbps): void
@@ -79,7 +106,16 @@ class MikroTikDriver implements RouterDriverInterface
 
     public function removeUser(string $username): void
     {
-        $this->connected()->talk(['/ppp/secret/remove', '=.id=' . $this->findSecretId($username)]);
+        $existingId = $this->findSecretIdOrNull($username);
+
+        if ($existingId !== null) {
+            $this->connected()->talk(['/ppp/secret/remove', "=.id={$existingId}"]);
+        }
+
+        // Removing a secret doesn't drop a session that's already up — a
+        // deleted customer would otherwise keep free internet until their
+        // modem happened to redial.
+        $this->kickActiveSession($username);
     }
 
     public function suspendUser(string $username): void
@@ -140,8 +176,13 @@ class MikroTikDriver implements RouterDriverInterface
             $client = new MikroTikApiClient($this->host, $this->port, useTls: $this->apiScheme === 'api-ssl');
             $client->connect();
 
-            if (! $client->login($this->username, $this->password)) {
-                throw new RuntimeException('Autentikasi ke router gagal. Periksa username/password.');
+            // A rejected login comes back as a !trap (thrown by talk()), not
+            // as login() returning false — rethrow it with a message an owner
+            // can act on, keeping RouterOS's own reason for the technician.
+            try {
+                $client->login($this->username, $this->password);
+            } catch (RuntimeException $e) {
+                throw new RuntimeException("Login ke router ditolak ({$e->getMessage()}). Periksa username/password API dan izin grup user-nya.");
             }
 
             $this->client = $client;
@@ -158,12 +199,14 @@ class MikroTikDriver implements RouterDriverInterface
 
     private function findSecretId(string $username): string
     {
+        return $this->findSecretIdOrNull($username)
+            ?? throw new RuntimeException("User PPPoE '{$username}' tidak ditemukan di router.");
+    }
+
+    private function findSecretIdOrNull(string $username): ?string
+    {
         $rows = $this->connected()->talk(['/ppp/secret/print', "?name={$username}"]);
 
-        if (empty($rows) || ! isset($rows[0]['.id'])) {
-            throw new RuntimeException("User PPPoE '{$username}' tidak ditemukan di router.");
-        }
-
-        return $rows[0]['.id'];
+        return $rows[0]['.id'] ?? null;
     }
 }

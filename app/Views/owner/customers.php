@@ -383,7 +383,7 @@ async function deleteCustomer(id, name) {
 
     try {
         const body = await nethubFetch(`/api/owner/customers/${id}`, { method: 'DELETE' });
-        showMessage(body.success ? 'success' : 'error', body.message);
+        showMessage(body.success ? 'success' : 'error', body.success ? body.message + routerSyncNote(body.data?.router_sync) : body.message);
         loadCustomers(currentPage);
     } catch (err) {
         if (err.message !== 'Unauthenticated') showMessage('error', 'Gagal menghapus pelanggan.');
