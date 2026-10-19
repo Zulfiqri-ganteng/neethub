@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Drivers\RouterDriverFactory;
 use App\Helpers\CryptoHelper;
+use App\Models\PackageModel;
 use App\Repositories\RouterRepository;
 use RuntimeException;
 use Throwable;
@@ -84,9 +85,21 @@ class RouterService
         return $this->applyToRouter($customer, 'suspendUser');
     }
 
+    /**
+     * Upserts rather than a bare enable, so activating a customer whose
+     * secret never reached the router (router offline at create time) is
+     * also the owner's natural retry: the secret gets created now instead of
+     * the enable failing with "not found".
+     */
     public function enableCustomer(array $customer): string
     {
-        return $this->applyToRouter($customer, 'enableUser');
+        $package = ! empty($customer['package_id']) ? (new PackageModel())->find($customer['package_id']) : null;
+
+        if ($package === null || empty($customer['pppoe_password'])) {
+            return $this->applyToRouter($customer, 'enableUser');
+        }
+
+        return $this->pushCustomer([...$customer, 'status' => 'active'], $package);
     }
 
     /**

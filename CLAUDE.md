@@ -2083,6 +2083,10 @@ closed here:
   - wrong-password and dead-port routers
   - `monitoring/traffic`, `routers/{id}/online-users`, `router:sync`
 
+  Follow-up the same day: `enableCustomer()` now upserts instead of a bare enable, so "Aktifkan
+  Pelanggan" also creates a secret that never reached the router (router offline at create time)
+  — the natural retry path for a new pending customer. Re-tested: 30/30 scenarios.
+
   This is the first time the protocol client and every driver command have run against *any*
   protocol peer. **Still not proven against real RouterOS hardware.** The mock shares the author's
   reading of the spec. Test rows were deleted afterward.
